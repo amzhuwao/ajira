@@ -1,13 +1,357 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  BUYER
+  SELLER
+  ADMIN
+}
+
+enum ProjectStatus {
+  OPEN
+  IN_PROGRESS
+  DELIVERED
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum BidStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum EscrowStatus {
+  PENDING
+  FUNDED
+  RELEASE_REQUESTED
+  RELEASED
+  REFUND_REQUESTED
+  REFUNDED
+  DISPUTED
+  CANCELED
+}
+
+enum PaymentChannel {
+  WEB
+  ECOCASH
+  ONEMONEY
+}
+
+enum PaymentStatus {
+  CREATED
+  SENT
+  PAID
+  CANCELLED
+  FAILED
+}
+
+enum WalletTxnType {
+  CREDIT
+  DEBIT
+  WITHDRAWAL
+  ADJUSTMENT
+}
+
+enum WalletTxnStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  COMPLETED
+  REJECTED
+}
+
+enum WithdrawalMethod {
+  ECOCASH
+  ONEMONEY
+  BANK
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED_RELEASE
+  RESOLVED_REFUND
+  CLOSED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  phone        String?
+  role         Role     @default(BUYER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  projectsAsBuyer Project[]           @relation("BuyerProjects")
+  bids            Bid[]
+  escrowsAsBuyer  Escrow[]            @relation("BuyerEscrows")
+  escrowsAsSeller Escrow[]            @relation("SellerEscrows")
+  wallet          SellerWallet?
+  walletTxns      WalletTransaction[]
+  withdrawals     WithdrawalRequest[]
+  disputesOpened  Dispute[]           @relation("DisputeOpener")
+  disputeMessages DisputeMessage[]
+  reviewsGiven    Review[]            @relation("Reviewer")
+  reviewsReceived Review[]            @relation("Reviewee")
+  services        Service[]
+  transitions     EscrowTransition[]
+
+  @@index([role])
+  @@index([email])
+}
+
+model Project {
+  id            String        @id @default(cuid())
+  title         String
+  description   String
+  budgetMin     Decimal       @db.Decimal(12, 2)
+  budgetMax     Decimal       @db.Decimal(12, 2)
+  category      String?
+  status        ProjectStatus @default(OPEN)
+  buyerId       String
+  acceptedBidId String?       @unique
+  deliveredAt   DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  buyer       User     @relation("BuyerProjects", fields: [buyerId], references: [id])
+  bids        Bid[]
+  acceptedBid Bid?     @relation("AcceptedBid", fields: [acceptedBidId], references: [id])
+  escrow      Escrow?
+  reviews     Review[]
+
+  @@index([buyerId])
+  @@index([status])
+}
+
+model Bid {
+  id           String    @id @default(cuid())
+  projectId    String
+  sellerId     String
+  amount       Decimal   @db.Decimal(12, 2)
+  proposal     String
+  deliveryDays Int
+  status       BidStatus @default(PENDING)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  seller      User     @relation(fields: [sellerId], references: [id])
+  acceptedFor Project? @relation("AcceptedBid")
+  escrow      Escrow?
+
+  @@unique([projectId, sellerId])
+  @@index([sellerId])
+  @@index([status])
+}
+
+model Escrow {
+  id         String       @id @default(cuid())
+  projectId  String       @unique
+  bidId      String       @unique
+  buyerId    String
+  sellerId   String
+  amount     Decimal      @db.Decimal(12, 2)
+  status     EscrowStatus @default(PENDING)
+  fundedAt   DateTime?
+  releasedAt DateTime?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  project     Project             @relation(fields: [projectId], references: [id])
+  bid         Bid                 @relation(fields: [bidId], references: [id])
+  buyer       User                @relation("BuyerEscrows", fields: [buyerId], references: [id])
+  seller      User                @relation("SellerEscrows", fields: [sellerId], references: [id])
+  payments    EscrowPayment[]
+  transitions EscrowTransition[]
+  dispute     Dispute?
+  walletTxns  WalletTransaction[]
+
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([status])
+}
+
+model EscrowTransition {
+  id          String       @id @default(cuid())
+  escrowId    String
+  fromStatus  EscrowStatus
+  toStatus    EscrowStatus
+  triggeredBy String
+  userId      String?
+  reason      String?
+  metadata    Json?
+  createdAt   DateTime     @default(now())
+
+  escrow Escrow @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id])
+
+  @@index([escrowId])
+}
+
+model EscrowPayment {
+  id                String         @id @default(cuid())
+  escrowId          String
+  merchantReference String         @unique
+  paynowReference   String?
+  pollUrl           String?
+  redirectUrl       String?
+  channel           PaymentChannel
+  phone             String?
+  amount            Decimal        @db.Decimal(12, 2)
+  status            PaymentStatus  @default(CREATED)
+  instructions      String?
+  rawStatus         String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  escrow Escrow @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+
+  @@index([escrowId])
+  @@index([status])
+}
+
+model SellerWallet {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  balance        Decimal  @default(0) @db.Decimal(12, 2)
+  pendingBalance Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model WalletTransaction {
+  id           String          @id @default(cuid())
+  userId       String
+  escrowId     String?
+  type         WalletTxnType
+  amount       Decimal         @db.Decimal(12, 2)
+  balanceAfter Decimal         @db.Decimal(12, 2)
+  description  String
+  status       WalletTxnStatus @default(COMPLETED)
+  createdAt    DateTime        @default(now())
+
+  user   User    @relation(fields: [userId], references: [id])
+  escrow Escrow? @relation(fields: [escrowId], references: [id])
+
+  @@index([userId])
+  @@index([escrowId])
+}
+
+model WithdrawalRequest {
+  id          String           @id @default(cuid())
+  userId      String
+  amount      Decimal          @db.Decimal(12, 2)
+  method      WithdrawalMethod
+  destination String
+  status      WithdrawalStatus @default(PENDING)
+  adminNote   String?
+  processedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Dispute {
+  id         String        @id @default(cuid())
+  escrowId   String        @unique
+  openedById String
+  reason     String
+  status     DisputeStatus @default(OPEN)
+  resolution String?
+  resolvedAt DateTime?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  escrow   Escrow            @relation(fields: [escrowId], references: [id])
+  openedBy User              @relation("DisputeOpener", fields: [openedById], references: [id])
+  messages DisputeMessage[]
+  evidence DisputeEvidence[]
+
+  @@index([status])
+}
+
+model DisputeMessage {
+  id        String   @id @default(cuid())
+  disputeId String
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+
+  dispute Dispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id])
+
+  @@index([disputeId])
+}
+
+model DisputeEvidence {
+  id           String   @id @default(cuid())
+  disputeId    String
+  uploadedById String
+  fileName     String
+  filePath     String
+  mimeType     String
+  createdAt    DateTime @default(now())
+
+  dispute Dispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+
+  @@index([disputeId])
+}
+
+model Review {
+  id         String   @id @default(cuid())
+  projectId  String
+  reviewerId String
+  revieweeId String
+  rating     Int
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  project  Project @relation(fields: [projectId], references: [id])
+  reviewer User    @relation("Reviewer", fields: [reviewerId], references: [id])
+  reviewee User    @relation("Reviewee", fields: [revieweeId], references: [id])
+
+  @@unique([projectId, reviewerId])
+  @@index([revieweeId])
+}
+
+model Service {
+  id          String   @id @default(cuid())
+  sellerId    String
+  title       String
+  description String
+  price       Decimal  @db.Decimal(12, 2)
+  category    String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  seller User @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  @@index([sellerId])
+  @@index([active])
 }
