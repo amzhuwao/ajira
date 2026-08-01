@@ -238,21 +238,18 @@ export async function processWithdrawalAction(
         },
       });
 
-      // Refund wallet
-      const wallet = await getOrCreateWallet(withdrawal.userId, tx);
-      const balanceAfter = Number(wallet.balance) + Number(withdrawal.amount);
-      await tx.sellerWallet.update({
-        where: { id: wallet.id },
-        data: { balance: balanceAfter },
+      await getOrCreateWallet(withdrawal.userId, tx);
+      const updated = await tx.sellerWallet.update({
+        where: { userId: withdrawal.userId },
+        data: { balance: { increment: withdrawal.amount } },
       });
 
       await tx.walletTransaction.create({
         data: {
-          walletId: wallet.id,
           userId: withdrawal.userId,
           type: "CREDIT",
           amount: withdrawal.amount,
-          balanceAfter,
+          balanceAfter: updated.balance,
           description: "Withdrawal rejected — balance restored",
           status: "COMPLETED",
         },

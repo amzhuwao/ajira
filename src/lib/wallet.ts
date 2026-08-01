@@ -1,10 +1,7 @@
 import { Prisma, WalletTxnType } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "./prisma";
 
-export async function getOrCreateWallet(
-  userId: string,
-  tx?: Prisma.TransactionClient
-) {
+export async function getOrCreateWallet(userId: string, tx?: Prisma.TransactionClient) {
   const client = tx ?? prisma;
   const existing = await client.sellerWallet.findUnique({ where: { userId } });
   if (existing) return existing;
@@ -13,78 +10,83 @@ export async function getOrCreateWallet(
   });
 }
 
-/** Alias used by some actions */
 export const ensureWallet = getOrCreateWallet;
 
 export async function creditEarnings(params: {
   userId: string;
-  amount: number;
+  amount: Prisma.Decimal | number | string;
   escrowId: string;
   description?: string;
   tx?: Prisma.TransactionClient;
 }) {
-  const amount = Number(params.amount);
-  if (!(amount > 0)) throw new Error("Amount must be positive");
+  const amount = new Prisma.Decimal(params.amount);
+  if (amount.lte(0)) {
+    throw new Error("Amount must be positive");
+  }
 
   const run = async (client: Prisma.TransactionClient) => {
-    const wallet = await getOrCreateWallet(params.userId, client);
-    const balanceAfter = Number(wallet.balance) + amount;
-    const updated = await client.sellerWallet.update({
-      where: { id: wallet.id },
-      data: { balance: balanceAfter },
+    await getOrCreateWallet(params.userId, client);
+
+    const wallet = await client.sellerWallet.update({
+      where: { userId: params.userId },
+      data: { balance: { increment: amount } },
     });
+
     await client.walletTransaction.create({
       data: {
-        walletId: updated.id,
         userId: params.userId,
         escrowId: params.escrowId,
         type: WalletTxnType.CREDIT,
         amount,
-        balanceAfter,
+        balanceAfter: wallet.balance,
         description: params.description ?? "Project earnings",
         status: "COMPLETED",
       },
     });
-    return updated;
+
+    return wallet;
   };
 
   if (params.tx) return run(params.tx);
-  return prisma.$transaction(run);
+  return prisma.$transaction(async (client) => run(client));
 }
 
 export async function debitForWithdrawal(params: {
   userId: string;
-  amount: number;
+  amount: Prisma.Decimal | number | string;
   description?: string;
   tx?: Prisma.TransactionClient;
 }) {
-  const amount = Number(params.amount);
-  if (!(amount > 0)) throw new Error("Amount must be positive");
+  const amount = new Prisma.Decimal(params.amount);
+  if (amount.lte(0)) {
+    throw new Error("Amount must be positive");
+  }
 
   const run = async (client: Prisma.TransactionClient) => {
     const wallet = await getOrCreateWallet(params.userId, client);
-    if (Number(wallet.balance) < amount) {
+    if (new Prisma.Decimal(wallet.balance).lt(amount)) {
       throw new Error("Insufficient wallet balance");
     }
-    const balanceAfter = Number(wallet.balance) - amount;
+
     const updated = await client.sellerWallet.update({
-      where: { id: wallet.id },
-      data: { balance: balanceAfter },
+      where: { userId: params.userId },
+      data: { balance: { decrement: amount } },
     });
+
     await client.walletTransaction.create({
       data: {
-        walletId: updated.id,
         userId: params.userId,
         type: WalletTxnType.WITHDRAWAL,
         amount,
-        balanceAfter,
+        balanceAfter: updated.balance,
         description: params.description ?? "Withdrawal",
         status: "COMPLETED",
       },
     });
+
     return updated;
   };
 
   if (params.tx) return run(params.tx);
-  return prisma.$transaction(run);
+  return prisma.$transaction(async (client) => run(client));
 }

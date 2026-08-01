@@ -157,15 +157,9 @@ export async function markDeliveredAction(projectId: string): Promise<ActionStat
     return { error: "Escrow must be funded before delivery." };
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.project.update({
-      where: { id: projectId },
-      data: { status: ProjectStatus.DELIVERED },
-    });
-    await tx.escrow.update({
-      where: { id: project.escrow!.id },
-      data: { workDeliveredAt: new Date() },
-    });
+  await prisma.project.update({
+    where: { id: projectId },
+    data: { status: ProjectStatus.DELIVERED, deliveredAt: new Date() },
   });
 
   revalidatePath(`/dashboard/projects/${projectId}`);

@@ -29,8 +29,8 @@ export function dashboardPathForRole(role: Role): string {
   }
 }
 
-export function formatUsd(amount: number | string): string {
-  const value = typeof amount === "string" ? Number(amount) : amount;
+export function formatUsd(amount: number | string | { toString(): string }): string {
+  const value = typeof amount === "number" ? amount : Number(amount.toString());
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
