@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { DM_Sans, Fraunces } from "next/font/google";
 import { AdSenseLoader } from "@/components/ads/adsense-loader";
 import { CookieNotice } from "@/components/layout/cookie-notice";
-import { PwaRegister } from "@/components/pwa-register";
+import { ServiceWorkerCleanup } from "@/components/service-worker-cleanup";
 import { getAppUrl } from "@/lib/legal";
 import "./globals.css";
 
@@ -69,12 +69,6 @@ export const metadata: Metadata = {
   verification: {
     google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION || undefined,
   },
-  manifest: "/manifest.json",
-  appleWebApp: {
-    capable: true,
-    title: "Ajira",
-    statusBarStyle: "default",
-  },
 };
 
 export const viewport: Viewport = {
@@ -127,7 +121,7 @@ export default function RootLayout({
         {children}
         <CookieNotice />
         <AdSenseLoader />
-        <PwaRegister />
+        <ServiceWorkerCleanup />
       </body>
     </html>
   );

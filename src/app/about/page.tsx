@@ -75,8 +75,8 @@ export default function AboutPage() {
           </p>
           <h2 className="font-display text-2xl text-ink pt-4">Android app</h2>
           <p>
-            Prefer a home-screen icon and native shell? Install the Ajira companion for Android —
-            it opens the full marketplace inside a trusted WebView.
+            Prefer the native experience? Install the Ajira companion for Android — buyer, seller,
+            and admin flows with in-app Paynow checkout.
           </p>
           <p>
             <a href="/download" className="btn btn-primary inline-flex">
