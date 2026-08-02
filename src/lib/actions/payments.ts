@@ -285,7 +285,6 @@ export async function processWithdrawalAction(
     });
   }
 
-  const { logAdminAction } = await import("@/lib/audit");
   await logAdminAction({
     adminId: session.user.id,
     action: `withdrawal_${decision.toLowerCase()}`,
