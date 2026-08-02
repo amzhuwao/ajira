@@ -5,8 +5,11 @@ import {
   acceptBidAction,
   markDeliveredAction,
   placeBidAction,
+  updateBidAction,
 } from "@/lib/actions/projects";
 import { submitReviewAction } from "@/lib/actions/reviews";
+import { sendProjectMessageAction } from "@/lib/actions/messages";
+import { TrustBadges } from "@/components/trust/badges";
 import { prisma } from "@/lib/prisma";
 import { formatDate, formatMoney, requireSession } from "@/lib/utils";
 
@@ -23,13 +26,24 @@ export default async function ProjectDetailPage({
     include: {
       buyer: { select: { id: true, name: true } },
       bids: {
-        include: { seller: { select: { id: true, name: true } } },
+        include: {
+          seller: {
+            select: {
+              id: true,
+              name: true,
+              kycVerified: true,
+              statistics: true,
+            },
+          },
+        },
         orderBy: { createdAt: "desc" },
       },
-      escrow: true,
+      escrow: { include: { milestones: { orderBy: { orderIndex: "asc" } } } },
       reviews: {
         include: { reviewer: { select: { name: true } } },
       },
+      invites: { where: { sellerId: session.user.id }, take: 1 },
+      conversation: { select: { id: true } },
     },
   });
 
@@ -44,6 +58,18 @@ export default async function ProjectDetailPage({
     isBuyer &&
     !existingReview &&
     (project.status === "COMPLETED" || project.escrow?.status === "RELEASED");
+  const canMessage =
+    isBuyer ||
+    Boolean(myBid) ||
+    project.invites.length > 0 ||
+    acceptedBid?.sellerId === session.user.id;
+  const screeningQuestions = Array.isArray(project.screeningQuestions)
+    ? (project.screeningQuestions as string[])
+    : [];
+  const canEditBid =
+    myBid?.status === "PENDING" &&
+    project.status === "OPEN" &&
+    Date.now() - myBid.createdAt.getTime() < 48 * 60 * 60 * 1000;
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -67,6 +93,19 @@ export default async function ProjectDetailPage({
         </div>
       </div>
 
+      <div className="mt-4 flex flex-wrap gap-2">
+        {canMessage ? (
+          <Link href={`/dashboard/messages/${project.id}`} className="btn btn-secondary">
+            Messages
+          </Link>
+        ) : null}
+        {project.escrow ? (
+          <Link href={`/dashboard/escrow/${project.escrow.id}`} className="btn btn-secondary">
+            Escrow ({project.escrow.status})
+          </Link>
+        ) : null}
+      </div>
+
       <section className="panel mt-8">
         <h2 className="font-display text-2xl">Brief</h2>
         <p className="mt-3 whitespace-pre-wrap text-ink-soft">{project.description}</p>
@@ -80,15 +119,17 @@ export default async function ProjectDetailPage({
             Timeline: <strong>{project.timeline}</strong>
           </p>
         </div>
+        {screeningQuestions.length > 0 ? (
+          <div className="mt-4">
+            <h3 className="font-semibold">Screening questions</h3>
+            <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-ink-soft">
+              {screeningQuestions.map((q) => (
+                <li key={q}>{q}</li>
+              ))}
+            </ol>
+          </div>
+        ) : null}
       </section>
-
-      {project.escrow ? (
-        <div className="mt-6">
-          <Link href={`/dashboard/escrow/${project.escrow.id}`} className="btn btn-secondary">
-            View escrow ({project.escrow.status})
-          </Link>
-        </div>
-      ) : null}
 
       {isSeller &&
       acceptedBid?.sellerId === session.user.id &&
@@ -103,7 +144,7 @@ export default async function ProjectDetailPage({
           className="mt-6"
         >
           <button className="btn btn-primary" type="submit">
-            Mark work delivered
+            Mark work / next milestone delivered
           </button>
         </form>
       ) : null}
@@ -111,6 +152,9 @@ export default async function ProjectDetailPage({
       {isSeller && project.status === "OPEN" && !myBid ? (
         <section className="panel mt-8">
           <h2 className="font-display text-2xl">Place a bid</h2>
+          {project.invites.length > 0 ? (
+            <p className="mt-2 text-sm text-forest">You were invited to bid on this project.</p>
+          ) : null}
           <ActionForm action={placeBidAction} className="mt-4 flex flex-col gap-4">
             <input type="hidden" name="projectId" value={project.id} />
             <div className="grid gap-4 sm:grid-cols-2">
@@ -129,10 +173,29 @@ export default async function ProjectDetailPage({
             </div>
             <div>
               <label className="label" htmlFor="proposal">
-                Proposal
+                Cover letter / proposal
               </label>
               <textarea className="textarea" id="proposal" name="proposal" required minLength={20} />
             </div>
+            <div>
+              <label className="label" htmlFor="portfolioUrl">
+                Portfolio link (optional)
+              </label>
+              <input className="input" id="portfolioUrl" name="portfolioUrl" type="url" placeholder="https://" />
+            </div>
+            {screeningQuestions.length > 0 ? (
+              <div>
+                <label className="label" htmlFor="screeningAnswers">
+                  Screening answers (one per line, matching questions)
+                </label>
+                <textarea
+                  className="textarea"
+                  id="screeningAnswers"
+                  name="screeningAnswers"
+                  placeholder={screeningQuestions.map((q, i) => `${i + 1}. ${q}`).join("\n")}
+                />
+              </div>
+            ) : null}
             <button className="btn btn-primary self-start" type="submit">
               Submit bid
             </button>
@@ -140,45 +203,140 @@ export default async function ProjectDetailPage({
         </section>
       ) : null}
 
-      {myBid ? (
+      {canEditBid && myBid ? (
+        <section className="panel mt-8">
+          <h2 className="font-display text-2xl">Edit proposal</h2>
+          <p className="mt-1 text-sm text-ink-soft">You can edit within 48 hours of submitting.</p>
+          <ActionForm action={updateBidAction} className="mt-4 flex flex-col gap-4">
+            <input type="hidden" name="projectId" value={project.id} />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="label" htmlFor="edit-amount">Amount</label>
+                <input
+                  className="input"
+                  id="edit-amount"
+                  name="amount"
+                  type="number"
+                  step="0.01"
+                  defaultValue={Number(myBid.amount)}
+                  required
+                />
+              </div>
+              <div>
+                <label className="label" htmlFor="edit-days">Delivery days</label>
+                <input
+                  className="input"
+                  id="edit-days"
+                  name="deliveryDays"
+                  type="number"
+                  min={1}
+                  defaultValue={myBid.deliveryDays}
+                  required
+                />
+              </div>
+            </div>
+            <textarea
+              className="textarea"
+              name="proposal"
+              defaultValue={myBid.proposal}
+              required
+              minLength={20}
+            />
+            <input
+              className="input"
+              name="portfolioUrl"
+              type="url"
+              defaultValue={myBid.portfolioUrl ?? ""}
+              placeholder="Portfolio URL"
+            />
+            <button className="btn btn-secondary self-start" type="submit">
+              Save changes
+            </button>
+          </ActionForm>
+        </section>
+      ) : myBid ? (
         <p className="mt-6 text-sm text-ink-soft">
           Your bid: {formatMoney(Number(myBid.amount))} · {myBid.status}
         </p>
       ) : null}
 
+      {canMessage && !project.conversation ? (
+        <section className="panel mt-8">
+          <h2 className="font-display text-2xl">Quick message</h2>
+          <ActionForm action={sendProjectMessageAction} className="mt-4 flex flex-col gap-3">
+            <input type="hidden" name="projectId" value={project.id} />
+            <textarea className="textarea" name="body" required placeholder="Ask a question…" />
+            <button className="btn btn-secondary self-start" type="submit">
+              Send message
+            </button>
+          </ActionForm>
+        </section>
+      ) : null}
+
       <section className="mt-10">
         <h2 className="font-display text-2xl">Bids ({project.bids.length})</h2>
         <div className="mt-4 space-y-3">
-          {project.bids.map((bid) => (
-            <div key={bid.id} className="panel">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <Link
-                    href={`/dashboard/sellers/${bid.seller.id}`}
-                    className="font-semibold text-forest"
-                  >
-                    {bid.seller.name}
-                  </Link>
-                  <div className="text-sm text-ink-soft">
-                    {formatMoney(Number(bid.amount))} · {bid.deliveryDays} days · {bid.status}
+          {project.bids.map((bid) => {
+            const answers =
+              bid.screeningAnswers && typeof bid.screeningAnswers === "object"
+                ? (bid.screeningAnswers as Record<string, string>)
+                : null;
+            return (
+              <div key={bid.id} className="panel">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <Link
+                      href={`/dashboard/sellers/${bid.seller.id}`}
+                      className="font-semibold text-forest"
+                    >
+                      {bid.seller.name}
+                    </Link>
+                    <div className="mt-1">
+                      <TrustBadges
+                        kycVerified={bid.seller.kycVerified}
+                        statistics={bid.seller.statistics}
+                      />
+                    </div>
+                    <div className="text-sm text-ink-soft">
+                      {formatMoney(Number(bid.amount))} · {bid.deliveryDays} days · {bid.status}
+                    </div>
                   </div>
+                  {isBuyer && project.status === "OPEN" && bid.status === "PENDING" ? (
+                    <form
+                      action={async () => {
+                        "use server";
+                        await acceptBidAction(bid.id);
+                      }}
+                    >
+                      <button className="btn btn-primary" type="submit">
+                        Accept bid
+                      </button>
+                    </form>
+                  ) : null}
                 </div>
-                {isBuyer && project.status === "OPEN" && bid.status === "PENDING" ? (
-                  <form
-                    action={async () => {
-                      "use server";
-                      await acceptBidAction(bid.id);
-                    }}
+                <p className="mt-3 whitespace-pre-wrap text-sm text-ink-soft">{bid.proposal}</p>
+                {bid.portfolioUrl ? (
+                  <a
+                    href={bid.portfolioUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-block text-sm text-forest"
                   >
-                    <button className="btn btn-primary" type="submit">
-                      Accept bid
-                    </button>
-                  </form>
+                    Portfolio
+                  </a>
+                ) : null}
+                {answers ? (
+                  <div className="mt-3 space-y-1 text-sm">
+                    {Object.entries(answers).map(([q, a]) => (
+                      <p key={q}>
+                        <strong>{q}:</strong> {a || "—"}
+                      </p>
+                    ))}
+                  </div>
                 ) : null}
               </div>
-              <p className="mt-3 whitespace-pre-wrap text-sm text-ink-soft">{bid.proposal}</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 

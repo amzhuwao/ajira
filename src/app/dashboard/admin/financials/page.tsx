@@ -86,27 +86,33 @@ export default async function AdminFinancialsPage() {
         </ul>
       </section>
 
-      <section className="panel mt-8 flex flex-wrap gap-3">
-        <form
-          action={async () => {
-            "use server";
-            await walletBackfillAction();
-          }}
-        >
-          <button className="btn btn-primary" type="submit">
-            Run wallet backfill
-          </button>
-        </form>
-        <form
-          action={async () => {
-            "use server";
-            await ensureSellerWalletsAction();
-          }}
-        >
-          <button className="btn btn-secondary" type="submit">
-            Ensure seller wallets
-          </button>
-        </form>
+      <section className="panel mt-8">
+        <h2 className="font-display text-2xl">Wallet tools</h2>
+        <p className="mt-1 text-sm text-ink-soft">
+          Repair seller wallets after releases that missed a credit (Jacob-style backfill).
+        </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <form
+            action={async () => {
+              "use server";
+              await walletBackfillAction();
+            }}
+          >
+            <button className="btn btn-primary" type="submit">
+              Run wallet backfill
+            </button>
+          </form>
+          <form
+            action={async () => {
+              "use server";
+              await ensureSellerWalletsAction();
+            }}
+          >
+            <button className="btn btn-secondary" type="submit">
+              Ensure seller wallets
+            </button>
+          </form>
+        </div>
       </section>
     </div>
   );

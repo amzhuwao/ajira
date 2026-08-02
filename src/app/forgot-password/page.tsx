@@ -2,7 +2,10 @@ import Link from "next/link";
 import { ActionForm } from "@/components/ui/action-form";
 import { requestPasswordResetAction } from "@/lib/actions/auth";
 
-export const metadata = { title: "Forgot password" };
+export const metadata = {
+  title: "Forgot password",
+  robots: { index: false, follow: false },
+};
 
 export default function ForgotPasswordPage() {
   return (

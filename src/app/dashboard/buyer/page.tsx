@@ -38,36 +38,31 @@ export default async function BuyerDashboardPage() {
     },
   });
 
-  const favoriteMap = new Map<
-    string,
-    {
-      id: string;
-      name: string;
-      tagline: string | null;
-      kycVerified: boolean;
-      jobs: number;
-      rating: number;
-    }
-  >();
+  const favoriteRows = await prisma.favoriteSeller.findMany({
+    where: { buyerId: session.user.id },
+    orderBy: { createdAt: "desc" },
+    take: 6,
+    include: {
+      seller: {
+        select: {
+          id: true,
+          name: true,
+          tagline: true,
+          kycVerified: true,
+          statistics: true,
+        },
+      },
+    },
+  });
 
-  for (const project of projects) {
-    const seller = project.acceptedBid?.seller;
-    if (!seller) continue;
-    const existing = favoriteMap.get(seller.id);
-    const jobs = (existing?.jobs ?? 0) + (project.status === "COMPLETED" ? 1 : 0);
-    favoriteMap.set(seller.id, {
-      id: seller.id,
-      name: seller.name,
-      tagline: seller.tagline,
-      kycVerified: seller.kycVerified,
-      jobs: Math.max(jobs, existing?.jobs ?? 0, seller.statistics?.completedJobs ?? 0),
-      rating: Number(seller.statistics?.averageRating ?? existing?.rating ?? 0),
-    });
-  }
-
-  const favorites = [...favoriteMap.values()]
-    .sort((a, b) => b.rating - a.rating || b.jobs - a.jobs)
-    .slice(0, 6);
+  const favorites = favoriteRows.map((f) => ({
+    id: f.seller.id,
+    name: f.seller.name,
+    tagline: f.seller.tagline,
+    kycVerified: f.seller.kycVerified,
+    jobs: f.seller.statistics?.completedJobs ?? 0,
+    rating: Number(f.seller.statistics?.averageRating ?? 0),
+  }));
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -119,10 +114,15 @@ export default async function BuyerDashboardPage() {
 
       {favorites.length > 0 ? (
         <section className="mt-10">
-          <h2 className="font-display text-2xl">Favorite freelancers</h2>
-          <p className="mt-1 text-sm text-ink-soft">
-            Sellers you have worked with or who earned strong ratings on your jobs.
-          </p>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="font-display text-2xl">Favorite freelancers</h2>
+              <p className="mt-1 text-sm text-ink-soft">Your saved shortlist.</p>
+            </div>
+            <Link href="/dashboard/favorites" className="text-sm text-forest">
+              Manage favorites →
+            </Link>
+          </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {favorites.map((seller) => (
               <Link key={seller.id} href={`/dashboard/sellers/${seller.id}`} className="panel block">
@@ -136,7 +136,22 @@ export default async function BuyerDashboardPage() {
             ))}
           </div>
         </section>
-      ) : null}
+      ) : (
+        <section className="mt-10 panel">
+          <h2 className="font-display text-2xl">Find talent</h2>
+          <p className="mt-2 text-sm text-ink-soft">
+            Browse sellers and save favorites for your next hire.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link href="/dashboard/talent" className="btn btn-primary">
+              Browse talent
+            </Link>
+            <Link href="/dashboard/catalog" className="btn btn-secondary">
+              Service catalog
+            </Link>
+          </div>
+        </section>
+      )}
 
       <section id="projects" className="mt-10">
         <h2 className="font-display text-2xl">All projects</h2>

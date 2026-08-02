@@ -210,3 +210,114 @@ export async function ensureSellerWalletsAction(): Promise<ActionState> {
   });
   return { success: `Ensured wallets for ${sellers.length} seller(s).` };
 }
+
+const FORCE_RELEASE_STATUSES: EscrowStatus[] = [
+  EscrowStatus.FUNDED,
+  EscrowStatus.RELEASE_REQUESTED,
+  EscrowStatus.REFUND_REQUESTED,
+];
+
+export async function adminReleaseEscrowAction(
+  escrowId: string,
+  note?: string,
+): Promise<ActionState> {
+  const session = await requireRole("ADMIN");
+  const reason = (note?.trim() || "Admin force release").slice(0, 500);
+
+  const escrow = await prisma.escrow.findUnique({
+    where: { id: escrowId },
+    include: { project: true, walletTxns: { where: { type: "CREDIT" } } },
+  });
+  if (!escrow) return { error: "Escrow not found." };
+  if (!FORCE_RELEASE_STATUSES.includes(escrow.status)) {
+    return { error: `Cannot release from status ${escrow.status}.` };
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await transitionEscrow(escrowId, EscrowStatus.RELEASED, {
+        triggeredBy: "admin",
+        userId: session.user.id,
+        reason,
+        tx,
+      });
+
+      const alreadyCredited = escrow.walletTxns.length > 0;
+      if (!alreadyCredited) {
+        await creditEarnings({
+          userId: escrow.sellerId,
+          amount: escrow.amount,
+          escrowId,
+          description: `Admin release: ${escrow.project.title}`,
+          applyCommission: true,
+          tx,
+        });
+      }
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Release failed." };
+  }
+
+  await logAdminAction({
+    adminId: session.user.id,
+    action: "escrow_force_release",
+    summary: `Force-released escrow for ${escrow.project.title}`,
+    targetType: "Escrow",
+    targetId: escrowId,
+    oldValue: { status: escrow.status },
+    newValue: { status: "RELEASED", reason },
+  });
+
+  revalidatePath("/dashboard/admin/escrows");
+  revalidatePath("/dashboard/admin");
+  revalidatePath(`/dashboard/escrow/${escrowId}`);
+  return { success: "Escrow released to seller wallet." };
+}
+
+export async function adminRefundEscrowAction(
+  escrowId: string,
+  note?: string,
+): Promise<ActionState> {
+  const session = await requireRole("ADMIN");
+  const reason = (
+    note?.trim() ||
+    "Admin refund — complete Paynow refund in merchant dashboard"
+  ).slice(0, 500);
+
+  const escrow = await prisma.escrow.findUnique({
+    where: { id: escrowId },
+    include: { project: true },
+  });
+  if (!escrow) return { error: "Escrow not found." };
+  if (!FORCE_RELEASE_STATUSES.includes(escrow.status)) {
+    return { error: `Cannot refund from status ${escrow.status}.` };
+  }
+
+  try {
+    await transitionEscrow(escrowId, EscrowStatus.REFUNDED, {
+      triggeredBy: "admin",
+      userId: session.user.id,
+      reason,
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Refund failed." };
+  }
+
+  await logAdminAction({
+    adminId: session.user.id,
+    action: "escrow_force_refund",
+    summary: `Marked escrow refunded for ${escrow.project.title}`,
+    targetType: "Escrow",
+    targetId: escrowId,
+    oldValue: { status: escrow.status },
+    newValue: { status: "REFUNDED", reason },
+  });
+
+  revalidatePath("/dashboard/admin/escrows");
+  revalidatePath("/dashboard/admin");
+  revalidatePath(`/dashboard/escrow/${escrowId}`);
+  return {
+    success:
+      "Escrow marked refunded. Process the Paynow refund in the merchant dashboard.",
+  };
+}

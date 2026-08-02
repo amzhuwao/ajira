@@ -9,8 +9,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   dispute_resolution_days: "7",
   kyc_required_for_seller: "false",
   maintenance_mode: "false",
-  tos_text: "By using Ajira you agree to our terms of service.",
-  privacy_text: "Ajira processes account and payment data to operate the marketplace.",
+  tos_text: "",
+  privacy_text: "",
 };
 
 export async function ensureDefaultSettings() {

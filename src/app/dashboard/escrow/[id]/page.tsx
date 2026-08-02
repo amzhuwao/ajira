@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FundEscrowForm } from "@/components/escrow/fund-form";
+import { MilestonePlanner } from "@/components/escrow/milestone-planner";
+import {
+  approveMilestoneAction,
+  markMilestoneDeliveredAction,
+} from "@/lib/actions/commerce";
 import { approveWorkAction } from "@/lib/actions/projects";
 import { prisma } from "@/lib/prisma";
 import { formatDate, formatMoney, requireSession } from "@/lib/utils";
@@ -21,6 +26,7 @@ export default async function EscrowPage({
       seller: { select: { name: true, email: true } },
       payments: { orderBy: { createdAt: "desc" }, take: 5 },
       dispute: true,
+      milestones: { orderBy: { orderIndex: "asc" } },
     },
   });
 
@@ -34,6 +40,15 @@ export default async function EscrowPage({
   if (!isParty) notFound();
 
   const isBuyer = escrow.buyerId === session.user.id;
+  const isSeller = escrow.sellerId === session.user.id;
+  const canPlanMilestones =
+    isBuyer &&
+    (escrow.status === "PENDING" || escrow.status === "FUNDED") &&
+    !escrow.milestones.some((m) => m.status === "RELEASED");
+  const deliveredMilestone = escrow.milestones.find((m) => m.status === "DELIVERED");
+  const nextForSeller = escrow.milestones.find(
+    (m) => m.status === "FUNDED" || m.status === "PENDING",
+  );
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -50,7 +65,18 @@ export default async function EscrowPage({
         <div className="panel">
           <div className="text-xs uppercase tracking-[0.12em] text-ink-soft">Amount</div>
           <div className="font-display text-3xl">{formatMoney(Number(escrow.amount))}</div>
+          {Number(escrow.releasedAmount) > 0 ? (
+            <p className="mt-1 text-xs text-ink-soft">
+              Released {formatMoney(escrow.releasedAmount)}
+            </p>
+          ) : null}
         </div>
+      </div>
+
+      <div className="mt-4">
+        <Link href={`/dashboard/messages/${escrow.projectId}`} className="btn btn-secondary">
+          Project messages
+        </Link>
       </div>
 
       <section className="mt-8 grid gap-4 sm:grid-cols-2">
@@ -77,7 +103,69 @@ export default async function EscrowPage({
         </section>
       ) : null}
 
-      {escrow.status === "FUNDED" && isBuyer && escrow.project.status === "DELIVERED" ? (
+      {canPlanMilestones ? (
+        <MilestonePlanner escrowId={escrow.id} totalAmount={Number(escrow.amount)} />
+      ) : null}
+
+      <section className="mt-8">
+        <h2 className="font-display text-2xl">Milestones</h2>
+        <div className="mt-4 space-y-3">
+          {escrow.milestones.length === 0 ? (
+            <div className="panel text-ink-soft">Single full-delivery release (default).</div>
+          ) : (
+            escrow.milestones.map((m) => (
+              <div key={m.id} className="panel">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="badge">{m.status}</p>
+                    <h3 className="mt-2 font-semibold">
+                      {m.orderIndex + 1}. {m.title}
+                    </h3>
+                    {m.description ? (
+                      <p className="mt-1 text-sm text-ink-soft">{m.description}</p>
+                    ) : null}
+                    <p className="mt-2 text-sm">{formatMoney(m.amount)}</p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {isSeller &&
+                    escrow.status === "FUNDED" &&
+                    nextForSeller?.id === m.id &&
+                    (m.status === "FUNDED" || m.status === "PENDING") ? (
+                      <form
+                        action={async () => {
+                          "use server";
+                          await markMilestoneDeliveredAction(m.id);
+                        }}
+                      >
+                        <button className="btn btn-primary" type="submit">
+                          Mark delivered
+                        </button>
+                      </form>
+                    ) : null}
+                    {isBuyer && m.status === "DELIVERED" ? (
+                      <form
+                        action={async () => {
+                          "use server";
+                          await approveMilestoneAction(m.id);
+                        }}
+                      >
+                        <button className="btn btn-primary" type="submit">
+                          Approve & release
+                        </button>
+                      </form>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
+      {escrow.status === "FUNDED" &&
+      isBuyer &&
+      escrow.project.status === "DELIVERED" &&
+      !deliveredMilestone ? (
         <form
           action={async () => {
             "use server";

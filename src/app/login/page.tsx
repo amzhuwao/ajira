@@ -2,7 +2,10 @@ import Link from "next/link";
 import { ActionForm } from "@/components/ui/action-form";
 import { loginAction } from "@/lib/actions/auth";
 
-export const metadata = { title: "Log in" };
+export const metadata = {
+  title: "Log in",
+  robots: { index: false, follow: false },
+};
 
 export default async function LoginPage({
   searchParams,

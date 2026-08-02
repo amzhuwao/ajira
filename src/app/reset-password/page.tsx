@@ -2,7 +2,10 @@ import Link from "next/link";
 import { ActionForm } from "@/components/ui/action-form";
 import { resetPasswordAction } from "@/lib/actions/auth";
 
-export const metadata = { title: "Reset password" };
+export const metadata = {
+  title: "Reset password",
+  robots: { index: false, follow: false },
+};
 
 export default async function ResetPasswordPage({
   searchParams,

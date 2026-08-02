@@ -1,6 +1,15 @@
+import type { Metadata } from "next";
 import Link from "next/link";
+import { SiteFooter } from "@/components/layout/site-footer";
 import { auth } from "@/lib/auth";
 import { dashboardPathForRole } from "@/lib/utils";
+
+export const metadata: Metadata = {
+  title: "Ajira — Freelance work, secured by escrow",
+  description:
+    "Hire freelancers and get paid with Paynow escrow in Zimbabwe. Projects, catalog services, milestones, messaging, and disputes.",
+  alternates: { canonical: "/" },
+};
 
 export default async function HomePage() {
   const session = await auth();
@@ -12,6 +21,12 @@ export default async function HomePage() {
         <nav className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
           <span className="font-display text-2xl tracking-tight text-cream">Ajira</span>
           <div className="flex items-center gap-3 text-sm text-cream">
+            <Link href="/services" className="hidden sm:inline-block opacity-90 hover:opacity-100">
+              Services
+            </Link>
+            <Link href="/how-it-works" className="hidden md:inline-block opacity-90 hover:opacity-100">
+              How it works
+            </Link>
             {dash ? (
               <Link href={dash} className="btn btn-ghost">
                 Dashboard
@@ -54,6 +69,44 @@ export default async function HomePage() {
         </div>
       </section>
 
+      <section className="border-t border-line bg-sand/30 px-6 py-16">
+        <div className="mx-auto max-w-6xl">
+          <h2 className="font-display text-3xl">Popular categories</h2>
+          <p className="mt-2 max-w-xl text-ink-soft">
+            Explore fixed packages or hire for custom briefs in the work you need.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            {[
+              "Web development",
+              "Graphic design",
+              "Writing",
+              "Marketing",
+              "Mobile apps",
+              "Video editing",
+            ].map((cat) => (
+              <Link
+                key={cat}
+                href={`/services`}
+                className="rounded-xl border border-line bg-panel px-4 py-3 text-sm font-medium text-ink hover:border-forest/40"
+              >
+                {cat}
+              </Link>
+            ))}
+          </div>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Link href={dash ?? "/register?role=BUYER"} className="btn btn-primary">
+              I want to hire
+            </Link>
+            <Link href={dash ?? "/register?role=SELLER"} className="btn btn-secondary">
+              I want to work
+            </Link>
+            <Link href="/about" className="btn btn-ghost">
+              About Ajira
+            </Link>
+          </div>
+        </div>
+      </section>
+
       <section className="mx-auto max-w-6xl px-6 py-20">
         <h2 className="font-display text-3xl sm:text-4xl">How Ajira works</h2>
         <p className="mt-3 max-w-2xl text-ink-soft">
@@ -85,14 +138,12 @@ export default async function HomePage() {
             </li>
           ))}
         </ol>
+        <Link href="/how-it-works" className="mt-8 inline-block text-forest">
+          Read the full walkthrough →
+        </Link>
       </section>
 
-      <footer className="border-t border-line px-6 py-10 text-sm text-ink-soft">
-        <div className="mx-auto flex max-w-6xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <span className="font-display text-lg text-ink">Ajira</span>
-          <span>Escrow marketplace · Powered by Paynow</span>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

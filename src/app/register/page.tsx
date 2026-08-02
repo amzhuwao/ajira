@@ -2,7 +2,10 @@ import Link from "next/link";
 import { ActionForm } from "@/components/ui/action-form";
 import { registerAction } from "@/lib/actions/auth";
 
-export const metadata = { title: "Create account" };
+export const metadata = {
+  title: "Create account",
+  robots: { index: false, follow: false },
+};
 
 export default async function RegisterPage({
   searchParams,
@@ -55,6 +58,28 @@ export default async function RegisterPage({
             <option value="BUYER">Hire freelancers</option>
             <option value="SELLER">Find work</option>
           </select>
+        </div>
+        <div>
+          <label className="flex items-start gap-2 text-sm text-ink-soft">
+            <input
+              type="checkbox"
+              name="acceptTerms"
+              value="on"
+              required
+              className="mt-1"
+            />
+            <span>
+              I agree to the{" "}
+              <Link href="/terms" className="text-forest underline-offset-2 hover:underline">
+                Terms of Service
+              </Link>{" "}
+              and{" "}
+              <Link href="/privacy" className="text-forest underline-offset-2 hover:underline">
+                Privacy Policy
+              </Link>
+              .
+            </span>
+          </label>
         </div>
         <button className="btn btn-primary" type="submit">
           Create account

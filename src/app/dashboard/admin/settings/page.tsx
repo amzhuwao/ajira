@@ -54,12 +54,18 @@ export default async function AdminSettingsPage() {
           </select>
         </div>
         <div className="sm:col-span-2">
-          <label className="label" htmlFor="tos_text">Terms of service</label>
-          <textarea className="textarea" id="tos_text" name="tos_text" defaultValue={settings.tos_text} />
+          <label className="label" htmlFor="tos_text">Terms of service (public /terms)</label>
+          <p className="mb-2 text-xs text-ink-soft">
+            Leave blank to use the built-in AdSense-ready terms. Custom text should stay comprehensive.
+          </p>
+          <textarea className="textarea" id="tos_text" name="tos_text" defaultValue={settings.tos_text} rows={8} />
         </div>
         <div className="sm:col-span-2">
-          <label className="label" htmlFor="privacy_text">Privacy text</label>
-          <textarea className="textarea" id="privacy_text" name="privacy_text" defaultValue={settings.privacy_text} />
+          <label className="label" htmlFor="privacy_text">Privacy policy (public /privacy)</label>
+          <p className="mb-2 text-xs text-ink-soft">
+            Leave blank to use the built-in policy (includes Google AdSense cookie disclosures).
+          </p>
+          <textarea className="textarea" id="privacy_text" name="privacy_text" defaultValue={settings.privacy_text} rows={8} />
         </div>
         <div className="sm:col-span-2">
           <button className="btn btn-primary" type="submit">Save settings</button>

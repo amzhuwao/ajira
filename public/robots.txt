@@ -1,0 +1,23 @@
+User-agent: *
+Allow: /
+Allow: /about
+Allow: /how-it-works
+Allow: /services
+Allow: /privacy
+Allow: /terms
+Allow: /contact
+Disallow: /dashboard
+Disallow: /api
+Disallow: /login
+Disallow: /register
+Disallow: /forgot-password
+Disallow: /reset-password
+Disallow: /uploads
+
+User-agent: Mediapartners-Google
+Allow: /
+Disallow: /dashboard
+Disallow: /api
+Disallow: /uploads
+
+Sitemap: https://ajira.online/sitemap.xml

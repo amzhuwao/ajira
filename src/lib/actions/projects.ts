@@ -1,13 +1,47 @@
 "use server";
 
-import { BidStatus, EscrowStatus, ProjectStatus } from "@prisma/client";
+import { BidStatus, EscrowStatus, MilestoneStatus, ProjectStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { ensureProjectConversation } from "@/lib/messaging";
+import { createNotification, createNotifications } from "@/lib/notifications";
 import { formatMoney, requireRole, requireSession } from "@/lib/utils";
 import { bidSchema, projectSchema } from "@/lib/validations";
 import { getSettingBool } from "@/lib/settings";
 import type { ActionState } from "./auth";
+
+function parseScreeningQuestions(raw: string | undefined): string[] | null {
+  if (!raw?.trim()) return null;
+  const lines = raw
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 5);
+  return lines.length > 0 ? lines : null;
+}
+
+function parseScreeningAnswers(
+  raw: string | undefined,
+  questions: unknown,
+): Record<string, string> | null {
+  if (!Array.isArray(questions) || questions.length === 0) return null;
+  if (!raw?.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, string>;
+    }
+  } catch {
+    // fall through to line-based
+  }
+  const lines = raw.split("\n").map((l) => l.trim());
+  const answers: Record<string, string> = {};
+  questions.forEach((q, i) => {
+    answers[String(q)] = lines[i] ?? "";
+  });
+  return answers;
+}
 
 export async function createProjectAction(
   _prev: ActionState,
@@ -22,11 +56,14 @@ export async function createProjectAction(
     budgetMax: formData.get("budgetMax"),
     category: formData.get("category"),
     timeline: formData.get("timeline") || "FLEXIBLE",
+    screeningQuestions: formData.get("screeningQuestions") ?? "",
   });
 
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid project" };
   }
+
+  const screeningQuestions = parseScreeningQuestions(parsed.data.screeningQuestions);
 
   const project = await prisma.project.create({
     data: {
@@ -36,6 +73,7 @@ export async function createProjectAction(
       budgetMax: parsed.data.budgetMax,
       category: parsed.data.category || null,
       timeline: parsed.data.timeline,
+      screeningQuestions: screeningQuestions ?? undefined,
       buyerId: session.user.id,
       status: ProjectStatus.OPEN,
     },
@@ -55,6 +93,8 @@ export async function placeBidAction(
     amount: formData.get("amount"),
     proposal: formData.get("proposal"),
     deliveryDays: formData.get("deliveryDays"),
+    portfolioUrl: formData.get("portfolioUrl") ?? "",
+    screeningAnswers: formData.get("screeningAnswers") ?? "",
   });
 
   if (!parsed.success) {
@@ -72,6 +112,7 @@ export async function placeBidAction(
 
   const project = await prisma.project.findUnique({
     where: { id: parsed.data.projectId },
+    include: { buyer: { select: { id: true, name: true } } },
   });
 
   if (!project || project.status !== ProjectStatus.OPEN) {
@@ -82,6 +123,11 @@ export async function placeBidAction(
     return { error: "You cannot bid on your own project." };
   }
 
+  const screeningAnswers = parseScreeningAnswers(
+    parsed.data.screeningAnswers,
+    project.screeningQuestions,
+  );
+
   try {
     await prisma.bid.create({
       data: {
@@ -90,14 +136,90 @@ export async function placeBidAction(
         amount: parsed.data.amount,
         proposal: parsed.data.proposal,
         deliveryDays: parsed.data.deliveryDays,
+        portfolioUrl: parsed.data.portfolioUrl || null,
+        screeningAnswers: screeningAnswers ?? undefined,
       },
     });
   } catch {
     return { error: "You already placed a bid on this project." };
   }
 
+  await ensureProjectConversation({
+    projectId: project.id,
+    participantIds: [project.buyerId, session.user.id],
+  });
+
+  await createNotification({
+    userId: project.buyerId,
+    type: "BID_RECEIVED",
+    title: `New bid on ${project.title}`,
+    body: `${seller.name} bid ${formatMoney(parsed.data.amount)}.`,
+    href: `/dashboard/projects/${project.id}`,
+  });
+
   revalidatePath(`/dashboard/projects/${parsed.data.projectId}`);
   return { success: "Bid submitted." };
+}
+
+export async function updateBidAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireRole("SELLER");
+
+  const parsed = bidSchema.safeParse({
+    projectId: formData.get("projectId"),
+    amount: formData.get("amount"),
+    proposal: formData.get("proposal"),
+    deliveryDays: formData.get("deliveryDays"),
+    portfolioUrl: formData.get("portfolioUrl") ?? "",
+    screeningAnswers: formData.get("screeningAnswers") ?? "",
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid bid" };
+  }
+
+  const bid = await prisma.bid.findUnique({
+    where: {
+      projectId_sellerId: {
+        projectId: parsed.data.projectId,
+        sellerId: session.user.id,
+      },
+    },
+    include: { project: true },
+  });
+
+  if (!bid || bid.status !== BidStatus.PENDING) {
+    return { error: "Only pending bids can be edited." };
+  }
+  if (bid.project.status !== ProjectStatus.OPEN) {
+    return { error: "Project is no longer open." };
+  }
+
+  const editWindowMs = 48 * 60 * 60 * 1000;
+  if (Date.now() - bid.createdAt.getTime() > editWindowMs) {
+    return { error: "The 48-hour proposal edit window has closed." };
+  }
+
+  const screeningAnswers = parseScreeningAnswers(
+    parsed.data.screeningAnswers,
+    bid.project.screeningQuestions,
+  );
+
+  await prisma.bid.update({
+    where: { id: bid.id },
+    data: {
+      amount: parsed.data.amount,
+      proposal: parsed.data.proposal,
+      deliveryDays: parsed.data.deliveryDays,
+      portfolioUrl: parsed.data.portfolioUrl || null,
+      screeningAnswers: screeningAnswers ?? undefined,
+    },
+  });
+
+  revalidatePath(`/dashboard/projects/${bid.projectId}`);
+  return { success: "Proposal updated." };
 }
 
 export async function acceptBidAction(bidId: string): Promise<ActionState> {
@@ -124,6 +246,15 @@ export async function acceptBidAction(bidId: string): Promise<ActionState> {
     select: { email: true, name: true },
   });
 
+  const rejected = await prisma.bid.findMany({
+    where: {
+      projectId: bid.projectId,
+      id: { not: bid.id },
+      status: BidStatus.PENDING,
+    },
+    select: { sellerId: true },
+  });
+
   const escrow = await prisma.$transaction(async (tx) => {
     await tx.bid.update({
       where: { id: bid.id },
@@ -147,7 +278,7 @@ export async function acceptBidAction(bidId: string): Promise<ActionState> {
       },
     });
 
-    return tx.escrow.create({
+    const created = await tx.escrow.create({
       data: {
         projectId: bid.projectId,
         bidId: bid.id,
@@ -155,9 +286,43 @@ export async function acceptBidAction(bidId: string): Promise<ActionState> {
         sellerId: bid.sellerId,
         amount: bid.amount,
         status: EscrowStatus.PENDING,
+        milestones: {
+          create: {
+            title: "Full delivery",
+            description: "Complete project delivery",
+            amount: bid.amount,
+            orderIndex: 0,
+            status: MilestoneStatus.PENDING,
+          },
+        },
       },
     });
+
+    await ensureProjectConversation({
+      projectId: bid.projectId,
+      participantIds: [bid.project.buyerId, bid.sellerId],
+      tx,
+    });
+
+    return created;
   });
+
+  await createNotifications([
+    {
+      userId: bid.sellerId,
+      type: "BID_ACCEPTED",
+      title: `Bid accepted: ${bid.project.title}`,
+      body: `Fund escrow for ${formatMoney(Number(bid.amount))} to start.`,
+      href: `/dashboard/escrow/${escrow.id}`,
+    },
+    ...rejected.map((r) => ({
+      userId: r.sellerId,
+      type: "BID_REJECTED" as const,
+      title: `Another bid was chosen: ${bid.project.title}`,
+      body: "Thanks for proposing — keep browsing open projects.",
+      href: `/dashboard/browse`,
+    })),
+  ]);
 
   try {
     const { sendBidAcceptedEmail } = await import("@/lib/mail");
@@ -184,7 +349,7 @@ export async function markDeliveredAction(projectId: string): Promise<ActionStat
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     include: {
-      escrow: true,
+      escrow: { include: { milestones: { orderBy: { orderIndex: "asc" } } } },
       buyer: { select: { email: true, name: true } },
     },
   });
@@ -197,9 +362,26 @@ export async function markDeliveredAction(projectId: string): Promise<ActionStat
     return { error: "Escrow must be funded before delivery." };
   }
 
+  const nextMilestone = project.escrow.milestones.find(
+    (m) => m.status === MilestoneStatus.FUNDED || m.status === MilestoneStatus.PENDING,
+  );
+
+  if (nextMilestone) {
+    const { markMilestoneDeliveredAction } = await import("./commerce");
+    return markMilestoneDeliveredAction(nextMilestone.id);
+  }
+
   await prisma.project.update({
     where: { id: projectId },
     data: { status: ProjectStatus.DELIVERED, deliveredAt: new Date() },
+  });
+
+  await createNotification({
+    userId: project.buyerId,
+    type: "WORK_DELIVERED",
+    title: `Work delivered: ${project.title}`,
+    body: "Review and approve to release escrow.",
+    href: `/dashboard/projects/${project.id}`,
   });
 
   try {
@@ -222,13 +404,12 @@ export async function markDeliveredAction(projectId: string): Promise<ActionStat
 
 export async function approveWorkAction(escrowId: string): Promise<ActionState> {
   const session = await requireRole("BUYER", "ADMIN");
-  const { transitionEscrow } = await import("@/lib/escrow");
-  const { creditEarnings } = await import("@/lib/wallet");
 
   const escrow = await prisma.escrow.findUnique({
     where: { id: escrowId },
     include: {
       project: true,
+      milestones: { orderBy: { orderIndex: "asc" } },
       buyer: { select: { email: true, name: true } },
       seller: { select: { email: true, name: true } },
     },
@@ -237,6 +418,15 @@ export async function approveWorkAction(escrowId: string): Promise<ActionState> 
   if (!escrow || escrow.buyerId !== session.user.id) {
     return { error: "Escrow not found." };
   }
+
+  const deliveredMilestone = escrow.milestones.find((m) => m.status === MilestoneStatus.DELIVERED);
+  if (deliveredMilestone) {
+    const { approveMilestoneAction } = await import("./commerce");
+    return approveMilestoneAction(deliveredMilestone.id);
+  }
+
+  const { transitionEscrow } = await import("@/lib/escrow");
+  const { creditEarnings } = await import("@/lib/wallet");
 
   if (escrow.status !== EscrowStatus.FUNDED) {
     return { error: "Escrow is not in a fundable release state." };
@@ -274,6 +464,19 @@ export async function approveWorkAction(escrowId: string): Promise<ActionState> 
       where: { id: escrow.projectId },
       data: { status: ProjectStatus.COMPLETED, completedAt: new Date() },
     });
+
+    await tx.milestone.updateMany({
+      where: { escrowId, status: { not: MilestoneStatus.RELEASED } },
+      data: { status: MilestoneStatus.RELEASED, releasedAt: new Date() },
+    });
+  });
+
+  await createNotification({
+    userId: escrow.sellerId,
+    type: "ESCROW_RELEASED",
+    title: `Funds released: ${escrow.project.title}`,
+    body: `${formatMoney(Number(escrow.amount))} credited to your wallet.`,
+    href: `/dashboard/wallet`,
   });
 
   try {

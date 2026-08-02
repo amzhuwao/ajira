@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ActionForm } from "@/components/ui/action-form";
+import { TrustBadges } from "@/components/trust/badges";
+import { inviteSellerAction, toggleFavoriteSellerAction } from "@/lib/actions/hiring";
+import { orderServiceAction } from "@/lib/actions/commerce";
 import { replyToReviewAction } from "@/lib/actions/reviews";
 import { recordProfileView } from "@/lib/actions/profile";
 import { prisma } from "@/lib/prisma";
@@ -38,6 +41,25 @@ export default async function SellerPublicProfilePage({
   await recordProfileView(seller.id);
 
   const isOwner = session.user.id === seller.id;
+  const isBuyer = session.user.role === "BUYER" || session.user.role === "ADMIN";
+
+  const [favorite, openProjects] = await Promise.all([
+    isBuyer
+      ? prisma.favoriteSeller.findUnique({
+          where: {
+            buyerId_sellerId: { buyerId: session.user.id, sellerId: seller.id },
+          },
+        })
+      : null,
+    isBuyer
+      ? prisma.project.findMany({
+          where: { buyerId: session.user.id, status: "OPEN" },
+          orderBy: { createdAt: "desc" },
+          select: { id: true, title: true },
+          take: 20,
+        })
+      : Promise.resolve([]),
+  ]);
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -45,7 +67,7 @@ export default async function SellerPublicProfilePage({
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={seller.coverImageUrl}
-          alt=""
+          alt={`${seller.name} cover`}
           className="mb-6 h-40 w-full rounded-2xl object-cover"
         />
       ) : null}
@@ -55,7 +77,7 @@ export default async function SellerPublicProfilePage({
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={seller.profileImageUrl}
-            alt=""
+            alt={`${seller.name} profile photo`}
             className="h-20 w-20 rounded-full object-cover"
           />
         ) : (
@@ -66,19 +88,62 @@ export default async function SellerPublicProfilePage({
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="font-display text-4xl">{seller.name}</h1>
-            {seller.kycVerified ? <span className="badge">KYC verified</span> : null}
           </div>
-          <p className="mt-1 text-ink-soft">{seller.tagline || "Seller on Ajira"}</p>
+          <div className="mt-2">
+            <TrustBadges kycVerified={seller.kycVerified} statistics={seller.statistics} />
+          </div>
+          <p className="mt-2 text-ink-soft">{seller.tagline || "Seller on Ajira"}</p>
           <p className="mt-2 text-sm text-ink-soft">
             {seller.availability} · {seller.profileViews} profile views
           </p>
         </div>
-        {isOwner ? (
-          <Link href="/dashboard/profile" className="btn btn-secondary">
-            Edit profile
-          </Link>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {isOwner ? (
+            <Link href="/dashboard/profile" className="btn btn-secondary">
+              Edit profile
+            </Link>
+          ) : null}
+          {isBuyer && !isOwner ? (
+            <form
+              action={async () => {
+                "use server";
+                await toggleFavoriteSellerAction(seller.id);
+              }}
+            >
+              <button className="btn btn-secondary" type="submit">
+                {favorite ? "Unfavorite" : "Save to favorites"}
+              </button>
+            </form>
+          ) : null}
+        </div>
       </div>
+
+      {isBuyer && !isOwner && openProjects.length > 0 ? (
+        <section className="panel mt-8">
+          <h2 className="font-display text-2xl">Invite to bid</h2>
+          <ActionForm action={inviteSellerAction} className="mt-4 flex flex-col gap-3">
+            <input type="hidden" name="sellerId" value={seller.id} />
+            <div>
+              <label className="label" htmlFor="projectId">Open project</label>
+              <select className="select" id="projectId" name="projectId" required>
+                {openProjects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <textarea
+              className="textarea"
+              name="message"
+              placeholder="Optional note to the seller"
+            />
+            <button className="btn btn-primary self-start" type="submit">
+              Send invite
+            </button>
+          </ActionForm>
+        </section>
+      ) : null}
 
       {seller.statistics ? (
         <div className="mt-6 grid gap-3 sm:grid-cols-4">
@@ -131,9 +196,26 @@ export default async function SellerPublicProfilePage({
                   <strong>{service.title}</strong>
                   <span>{formatMoney(service.price)}</span>
                 </div>
+                <p className="mt-1 text-xs text-ink-soft">
+                  {service.deliveryDays} days
+                  {service.category ? ` · ${service.category}` : ""}
+                </p>
                 <p className="mt-2 text-sm text-ink-soft whitespace-pre-wrap">
                   {service.description}
                 </p>
+                {service.deliverables ? (
+                  <p className="mt-2 text-sm">
+                    <strong>Includes:</strong> {service.deliverables}
+                  </p>
+                ) : null}
+                {isBuyer && !isOwner ? (
+                  <ActionForm action={orderServiceAction} className="mt-3 flex flex-col gap-2">
+                    <input type="hidden" name="serviceId" value={service.id} />
+                    <button className="btn btn-primary self-start" type="submit">
+                      Order now
+                    </button>
+                  </ActionForm>
+                ) : null}
               </div>
             ))
           )}

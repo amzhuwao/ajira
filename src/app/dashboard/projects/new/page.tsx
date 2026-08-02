@@ -60,6 +60,17 @@ export default async function NewProjectPage() {
           </label>
           <textarea className="textarea" id="description" name="description" required minLength={20} />
         </div>
+        <div>
+          <label className="label" htmlFor="screeningQuestions">
+            Screening questions (optional, one per line, max 5)
+          </label>
+          <textarea
+            className="textarea"
+            id="screeningQuestions"
+            name="screeningQuestions"
+            placeholder={"What tools do you use?\nShare a relevant sample."}
+          />
+        </div>
         <button className="btn btn-primary self-start" type="submit">
           Publish project
         </button>

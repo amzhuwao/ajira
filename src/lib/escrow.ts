@@ -7,9 +7,12 @@ const VALID_TRANSITIONS: Record<EscrowStatus, EscrowStatus[]> = {
     EscrowStatus.RELEASE_REQUESTED,
     EscrowStatus.REFUND_REQUESTED,
     EscrowStatus.DISPUTED,
+    // Admin force release / refund (Jacob parity)
+    EscrowStatus.RELEASED,
+    EscrowStatus.REFUNDED,
   ],
-  RELEASE_REQUESTED: [EscrowStatus.RELEASED, EscrowStatus.DISPUTED],
-  REFUND_REQUESTED: [EscrowStatus.REFUNDED, EscrowStatus.DISPUTED],
+  RELEASE_REQUESTED: [EscrowStatus.RELEASED, EscrowStatus.DISPUTED, EscrowStatus.REFUNDED],
+  REFUND_REQUESTED: [EscrowStatus.REFUNDED, EscrowStatus.DISPUTED, EscrowStatus.RELEASED],
   DISPUTED: [EscrowStatus.RELEASED, EscrowStatus.REFUNDED],
   RELEASED: [],
   REFUNDED: [],
@@ -67,6 +70,10 @@ export async function transitionEscrow(
     });
 
     if (toStatus === EscrowStatus.FUNDED) {
+      await client.milestone.updateMany({
+        where: { escrowId, status: "PENDING" },
+        data: { status: "FUNDED", fundedAt: new Date() },
+      });
       await client.project.update({
         where: { id: escrow.projectId },
         data: { status: "IN_PROGRESS" },

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ActionForm } from "@/components/ui/action-form";
 import {
   createServiceAction,
@@ -18,10 +19,17 @@ export default async function ServicesPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <h1 className="font-display text-4xl">Your services</h1>
-      <p className="mt-2 text-ink-soft">
-        List gigs buyers can see on your public profile.
-      </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="font-display text-4xl">Your services</h1>
+          <p className="mt-2 text-ink-soft">
+            Packages appear in the catalog and on your profile for instant orders.
+          </p>
+        </div>
+        <Link href="/dashboard/catalog" className="btn btn-secondary">
+          View catalog
+        </Link>
+      </div>
 
       <ActionForm action={createServiceAction} className="panel mt-8 flex flex-col gap-4">
         <h2 className="font-display text-2xl">Add service</h2>
@@ -29,10 +37,14 @@ export default async function ServicesPage() {
           <label className="label" htmlFor="title">Title</label>
           <input className="input" id="title" name="title" required minLength={3} />
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-3">
           <div>
             <label className="label" htmlFor="price">Price (USD)</label>
             <input className="input" id="price" name="price" type="number" step="0.01" min="1" required />
+          </div>
+          <div>
+            <label className="label" htmlFor="deliveryDays">Delivery days</label>
+            <input className="input" id="deliveryDays" name="deliveryDays" type="number" min={1} defaultValue={7} required />
           </div>
           <div>
             <label className="label" htmlFor="category">Category</label>
@@ -51,6 +63,10 @@ export default async function ServicesPage() {
           <label className="label" htmlFor="description">Description</label>
           <textarea className="textarea" id="description" name="description" required minLength={10} />
         </div>
+        <div>
+          <label className="label" htmlFor="deliverables">Deliverables (what’s included)</label>
+          <textarea className="textarea" id="deliverables" name="deliverables" placeholder="3 logo concepts, source files…" />
+        </div>
         <button className="btn btn-primary self-start" type="submit">Create service</button>
       </ActionForm>
 
@@ -63,8 +79,9 @@ export default async function ServicesPage() {
                 <input className="input font-semibold" name="title" defaultValue={service.title} required />
                 <span className="badge">{service.status}</span>
               </div>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-4">
                 <input className="input" name="price" type="number" step="0.01" defaultValue={Number(service.price)} required />
+                <input className="input" name="deliveryDays" type="number" min={1} defaultValue={service.deliveryDays} required />
                 <input className="input" name="category" defaultValue={service.category ?? ""} placeholder="Category" />
                 <select className="select" name="status" defaultValue={service.status}>
                   <option value="ACTIVE">Active</option>
@@ -73,10 +90,16 @@ export default async function ServicesPage() {
                 </select>
               </div>
               <textarea className="textarea" name="description" defaultValue={service.description} required />
+              <textarea
+                className="textarea"
+                name="deliverables"
+                defaultValue={service.deliverables ?? ""}
+                placeholder="Deliverables"
+              />
               <div className="flex flex-wrap gap-2">
                 <button className="btn btn-secondary" type="submit">Save</button>
                 <span className="text-sm text-ink-soft self-center">
-                  Listed at {formatMoney(service.price)}
+                  Listed at {formatMoney(service.price)} · {service.deliveryDays} days
                 </span>
               </div>
             </ActionForm>

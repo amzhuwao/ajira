@@ -39,7 +39,7 @@ export async function creditEarnings(params: {
 
       await client.escrow.update({
         where: { id: params.escrowId },
-        data: { feeAmount: fee },
+        data: { feeAmount: { increment: fee } },
       });
     }
 

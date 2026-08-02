@@ -37,6 +37,7 @@ export async function registerAction(
     password: String(formData.get("password") ?? ""),
     role: String(formData.get("role") ?? "BUYER"),
     phone: String(formData.get("phone") ?? ""),
+    acceptTerms: formData.get("acceptTerms") === "on" ? "on" : "",
   };
 
   const parsed = registerSchema.safeParse(raw);

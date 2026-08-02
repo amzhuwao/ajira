@@ -115,6 +115,8 @@ export async function createServiceAction(
     description: formData.get("description"),
     price: formData.get("price"),
     category: formData.get("category") ?? "",
+    deliveryDays: formData.get("deliveryDays") || 7,
+    deliverables: formData.get("deliverables") ?? "",
     status: formData.get("status") || "ACTIVE",
   });
 
@@ -129,11 +131,14 @@ export async function createServiceAction(
       description: parsed.data.description,
       price: parsed.data.price,
       category: parsed.data.category || null,
+      deliveryDays: parsed.data.deliveryDays,
+      deliverables: parsed.data.deliverables || null,
       status: parsed.data.status,
     },
   });
 
   revalidatePath("/dashboard/services");
+  revalidatePath("/dashboard/catalog");
   revalidatePath(`/dashboard/sellers/${session.user.id}`);
   return { success: "Service created." };
 }
@@ -150,6 +155,8 @@ export async function updateServiceAction(
     description: formData.get("description"),
     price: formData.get("price"),
     category: formData.get("category") ?? "",
+    deliveryDays: formData.get("deliveryDays") || 7,
+    deliverables: formData.get("deliverables") ?? "",
     status: formData.get("status") || "ACTIVE",
   });
 
@@ -169,11 +176,14 @@ export async function updateServiceAction(
       description: parsed.data.description,
       price: parsed.data.price,
       category: parsed.data.category || null,
+      deliveryDays: parsed.data.deliveryDays,
+      deliverables: parsed.data.deliverables || null,
       status: parsed.data.status,
     },
   });
 
   revalidatePath("/dashboard/services");
+  revalidatePath("/dashboard/catalog");
   return { success: "Service updated." };
 }
 

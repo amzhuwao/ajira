@@ -14,6 +14,7 @@ import {
 import { fundEscrowSchema, withdrawalSchema } from "@/lib/validations";
 import { debitForWithdrawal, getOrCreateWallet } from "@/lib/wallet";
 import { transitionEscrow } from "@/lib/escrow";
+import { logAdminAction } from "@/lib/audit";
 import type { ActionState } from "./auth";
 
 function moneyNumber(value: { toString(): string } | number): number {
@@ -163,6 +164,24 @@ export async function pollEscrowPaymentAction(paymentId: string): Promise<Action
       reason: "Payment confirmed via poll",
       metadata: { paymentId: payment.id, status: status.status },
     });
+    try {
+      const { createNotification } = await import("@/lib/notifications");
+      const escrow = await prisma.escrow.findUnique({
+        where: { id: payment.escrowId },
+        include: { project: { select: { title: true } } },
+      });
+      if (escrow) {
+        await createNotification({
+          userId: escrow.sellerId,
+          type: "ESCROW_FUNDED",
+          title: `Escrow funded: ${escrow.project.title}`,
+          body: "You can start work. Mark delivery when ready.",
+          href: `/dashboard/escrow/${escrow.id}`,
+        });
+      }
+    } catch (err) {
+      console.error("Funded notification failed", err);
+    }
     revalidatePath(`/dashboard/escrow/${payment.escrowId}`);
     return { success: "Payment confirmed. Escrow funded." };
   }
@@ -266,9 +285,18 @@ export async function processWithdrawalAction(
     });
   }
 
-  // silence unused
-  void session;
+  const { logAdminAction } = await import("@/lib/audit");
+  await logAdminAction({
+    adminId: session.user.id,
+    action: `withdrawal_${decision.toLowerCase()}`,
+    summary: `Withdrawal ${decision.toLowerCase()} for ${withdrawal.amount}`,
+    targetType: "WithdrawalRequest",
+    targetId: withdrawalId,
+    oldValue: { status: withdrawal.status },
+    newValue: { status: decision, adminNote: adminNote ?? null },
+  });
 
   revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/admin/withdrawals");
   return { success: `Withdrawal marked ${decision}.` };
 }

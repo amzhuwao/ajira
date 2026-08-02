@@ -6,6 +6,9 @@ export const registerSchema = z.object({
   password: z.string().min(8).max(100),
   role: z.enum(["BUYER", "SELLER"]),
   phone: z.string().min(7).max(20).optional().or(z.literal("")),
+  acceptTerms: z
+    .string()
+    .refine((v) => v === "on", { message: "You must accept the Terms and Privacy Policy" }),
 });
 
 export const loginSchema = z.object({
@@ -42,6 +45,7 @@ export const projectSchema = z.object({
   budgetMax: z.coerce.number().positive(),
   category: z.string().max(80).optional().or(z.literal("")),
   timeline: z.enum(["URGENT", "SHORT", "MEDIUM", "FLEXIBLE"]).default("FLEXIBLE"),
+  screeningQuestions: z.string().max(2000).optional().or(z.literal("")),
 }).refine((d) => d.budgetMax >= d.budgetMin, {
   message: "Maximum budget must be at least the minimum",
   path: ["budgetMax"],
@@ -52,6 +56,29 @@ export const bidSchema = z.object({
   amount: z.coerce.number().positive(),
   proposal: z.string().min(20).max(5000),
   deliveryDays: z.coerce.number().int().min(1).max(365),
+  portfolioUrl: z.string().url().max(500).optional().or(z.literal("")),
+  screeningAnswers: z.string().max(5000).optional().or(z.literal("")),
+});
+
+export const messageSchema = z.object({
+  projectId: z.string().min(1),
+  body: z.string().min(1).max(5000),
+});
+
+export const inviteSchema = z.object({
+  projectId: z.string().min(1),
+  sellerId: z.string().min(1),
+  message: z.string().max(1000).optional().or(z.literal("")),
+});
+
+export const milestonePlanSchema = z.object({
+  escrowId: z.string().min(1),
+  milestonesJson: z.string().min(2).max(10000),
+});
+
+export const orderServiceSchema = z.object({
+  serviceId: z.string().min(1),
+  notes: z.string().max(2000).optional().or(z.literal("")),
 });
 
 export const fundEscrowSchema = z.object({
@@ -115,6 +142,8 @@ export const serviceSchema = z.object({
   description: z.string().min(10).max(5000),
   price: z.coerce.number().positive(),
   category: z.string().max(80).optional().or(z.literal("")),
+  deliveryDays: z.coerce.number().int().min(1).max(365).default(7),
+  deliverables: z.string().max(2000).optional().or(z.literal("")),
   status: z.enum(["ACTIVE", "DRAFT", "PAUSED"]),
 });
 

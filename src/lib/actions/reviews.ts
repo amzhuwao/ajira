@@ -68,6 +68,14 @@ export async function submitReviewAction(
         projectTitle: project.title,
         profileUrl: `${appUrl}/dashboard/sellers/${seller.id}`,
       });
+      const { createNotification } = await import("@/lib/notifications");
+      await createNotification({
+        userId: sellerId,
+        type: "REVIEW",
+        title: `New ${parsed.data.rating}★ review`,
+        body: project.title,
+        href: `/dashboard/sellers/${sellerId}`,
+      });
     }
     const { refreshSellerStatistics } = await import("@/lib/stats");
     await refreshSellerStatistics(sellerId);

@@ -116,6 +116,30 @@ enum SellerAvailability {
   UNAVAILABLE
 }
 
+enum MilestoneStatus {
+  PENDING
+  FUNDED
+  DELIVERED
+  RELEASED
+  REFUNDED
+}
+
+enum NotificationType {
+  BID_RECEIVED
+  BID_ACCEPTED
+  BID_REJECTED
+  MESSAGE
+  WORK_DELIVERED
+  ESCROW_FUNDED
+  ESCROW_RELEASED
+  DISPUTE
+  INVITE
+  REVIEW
+  MILESTONE
+  ORDER
+  SYSTEM
+}
+
 model User {
   id              String             @id @default(cuid())
   email           String             @unique
@@ -135,24 +159,31 @@ model User {
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
-  projectsAsBuyer Project[]           @relation("BuyerProjects")
-  bids            Bid[]
-  escrowsAsBuyer  Escrow[]            @relation("BuyerEscrows")
-  escrowsAsSeller Escrow[]            @relation("SellerEscrows")
-  wallet          SellerWallet?
-  walletTxns      WalletTransaction[]
-  withdrawals     WithdrawalRequest[]
-  disputesOpened  Dispute[]           @relation("DisputeOpener")
-  disputeMessages DisputeMessage[]
-  reviewsGiven    Review[]            @relation("Reviewer")
-  reviewsReceived Review[]            @relation("Reviewee")
-  services        Service[]
-  transitions     EscrowTransition[]
-  passwordResets  PasswordResetToken[]
-  statistics      SellerStatistic?
-  profileViewsLog ProfileView[]       @relation("ProfileViewed")
-  viewedProfiles  ProfileView[]       @relation("ProfileViewer")
-  adminLogs       AdminActivityLog[]
+  projectsAsBuyer       Project[]                  @relation("BuyerProjects")
+  bids                  Bid[]
+  escrowsAsBuyer        Escrow[]                   @relation("BuyerEscrows")
+  escrowsAsSeller       Escrow[]                   @relation("SellerEscrows")
+  wallet                SellerWallet?
+  walletTxns            WalletTransaction[]
+  withdrawals           WithdrawalRequest[]
+  disputesOpened        Dispute[]                  @relation("DisputeOpener")
+  disputeMessages       DisputeMessage[]
+  reviewsGiven          Review[]                   @relation("Reviewer")
+  reviewsReceived       Review[]                   @relation("Reviewee")
+  services              Service[]
+  transitions           EscrowTransition[]
+  passwordResets        PasswordResetToken[]
+  statistics            SellerStatistic?
+  profileViewsLog       ProfileView[]              @relation("ProfileViewed")
+  viewedProfiles        ProfileView[]              @relation("ProfileViewer")
+  adminLogs             AdminActivityLog[]
+  conversationParts     ConversationParticipant[]
+  conversationMessages  ConversationMessage[]
+  notifications         Notification[]
+  favoriteSellers       FavoriteSeller[]           @relation("BuyerFavorites")
+  favoritedBy           FavoriteSeller[]           @relation("SellerFavoritedBy")
+  invitesSent           ProjectInvite[]            @relation("InviteSender")
+  invitesReceived       ProjectInvite[]            @relation("InvitedSeller")
 
   @@index([role])
   @@index([email])
@@ -174,42 +205,51 @@ model PasswordResetToken {
 }
 
 model Project {
-  id            String           @id @default(cuid())
-  title         String
-  description   String
-  budgetMin     Decimal          @db.Decimal(12, 2)
-  budgetMax     Decimal          @db.Decimal(12, 2)
-  category      String?
-  timeline      ProjectTimeline  @default(FLEXIBLE)
-  status        ProjectStatus    @default(OPEN)
-  buyerId       String
-  acceptedBidId String?          @unique
-  deliveredAt   DateTime?
-  completedAt   DateTime?
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  id                 String           @id @default(cuid())
+  title              String
+  description        String
+  budgetMin          Decimal          @db.Decimal(12, 2)
+  budgetMax          Decimal          @db.Decimal(12, 2)
+  category           String?
+  timeline           ProjectTimeline  @default(FLEXIBLE)
+  status             ProjectStatus    @default(OPEN)
+  buyerId            String
+  acceptedBidId      String?          @unique
+  screeningQuestions Json?
+  serviceId          String?
+  deliveredAt        DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
 
-  buyer       User     @relation("BuyerProjects", fields: [buyerId], references: [id])
-  bids        Bid[]
-  acceptedBid Bid?     @relation("AcceptedBid", fields: [acceptedBidId], references: [id])
-  escrow      Escrow?
-  reviews     Review[]
+  buyer        User           @relation("BuyerProjects", fields: [buyerId], references: [id])
+  bids         Bid[]
+  acceptedBid  Bid?           @relation("AcceptedBid", fields: [acceptedBidId], references: [id])
+  escrow       Escrow?
+  reviews      Review[]
+  conversation Conversation?
+  invites      ProjectInvite[]
+  service      Service?       @relation(fields: [serviceId], references: [id], onDelete: SetNull)
 
   @@index([buyerId])
   @@index([status])
+  @@index([category])
+  @@index([serviceId])
 }
 
 model Bid {
-  id           String    @id @default(cuid())
-  projectId    String
-  sellerId     String
-  amount       Decimal   @db.Decimal(12, 2)
-  proposal     String
-  deliveryDays Int
-  status       BidStatus @default(PENDING)
-  respondedAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id               String    @id @default(cuid())
+  projectId        String
+  sellerId         String
+  amount           Decimal   @db.Decimal(12, 2)
+  proposal         String
+  deliveryDays     Int
+  portfolioUrl     String?
+  screeningAnswers Json?
+  status           BidStatus @default(PENDING)
+  respondedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   seller      User     @relation(fields: [sellerId], references: [id])
@@ -222,18 +262,19 @@ model Bid {
 }
 
 model Escrow {
-  id         String       @id @default(cuid())
-  projectId  String       @unique
-  bidId      String       @unique
-  buyerId    String
-  sellerId   String
-  amount     Decimal      @db.Decimal(12, 2)
-  feeAmount  Decimal      @default(0) @db.Decimal(12, 2)
-  status     EscrowStatus @default(PENDING)
-  fundedAt   DateTime?
-  releasedAt DateTime?
-  createdAt  DateTime     @default(now())
-  updatedAt  DateTime     @updatedAt
+  id             String       @id @default(cuid())
+  projectId      String       @unique
+  bidId          String       @unique
+  buyerId        String
+  sellerId       String
+  amount         Decimal      @db.Decimal(12, 2)
+  feeAmount      Decimal      @default(0) @db.Decimal(12, 2)
+  releasedAmount Decimal      @default(0) @db.Decimal(12, 2)
+  status         EscrowStatus @default(PENDING)
+  fundedAt       DateTime?
+  releasedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   project     Project             @relation(fields: [projectId], references: [id])
   bid         Bid                 @relation(fields: [bidId], references: [id])
@@ -243,6 +284,7 @@ model Escrow {
   transitions EscrowTransition[]
   dispute     Dispute?
   walletTxns  WalletTransaction[]
+  milestones  Milestone[]
 
   @@index([buyerId])
   @@index([sellerId])
@@ -404,20 +446,24 @@ model Review {
 }
 
 model Service {
-  id          String        @id @default(cuid())
-  sellerId    String
-  title       String
-  description String
-  price       Decimal       @db.Decimal(12, 2)
-  category    String?
-  status      ServiceStatus @default(ACTIVE)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id           String        @id @default(cuid())
+  sellerId     String
+  title        String
+  description  String
+  price        Decimal       @db.Decimal(12, 2)
+  category     String?
+  deliveryDays Int           @default(7)
+  deliverables String?
+  status       ServiceStatus @default(ACTIVE)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
-  seller User @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  seller   User      @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  projects Project[]
 
   @@index([sellerId])
   @@index([status])
+  @@index([category])
 }
 
 model SellerStatistic {
@@ -473,4 +519,114 @@ model AdminActivityLog {
   @@index([adminId])
   @@index([action])
   @@index([createdAt])
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  projectId String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project      Project                    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  participants ConversationParticipant[]
+  messages     ConversationMessage[]
+}
+
+model ConversationParticipant {
+  id             String    @id @default(cuid())
+  conversationId String
+  userId         String
+  lastReadAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model ConversationMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  authorId       String
+  body           String
+  attachmentUrl  String?
+  attachmentName String?
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  author       User         @relation(fields: [authorId], references: [id])
+
+  @@index([conversationId])
+  @@index([authorId])
+  @@index([createdAt])
+}
+
+model Milestone {
+  id          String          @id @default(cuid())
+  escrowId    String
+  title       String
+  description String?
+  amount      Decimal         @db.Decimal(12, 2)
+  orderIndex  Int
+  status      MilestoneStatus @default(PENDING)
+  fundedAt    DateTime?
+  deliveredAt DateTime?
+  releasedAt  DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  escrow Escrow @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+
+  @@index([escrowId])
+  @@index([status])
+  @@unique([escrowId, orderIndex])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String
+  href      String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([createdAt])
+}
+
+model FavoriteSeller {
+  id        String   @id @default(cuid())
+  buyerId   String
+  sellerId  String
+  createdAt DateTime @default(now())
+
+  buyer  User @relation("BuyerFavorites", fields: [buyerId], references: [id], onDelete: Cascade)
+  seller User @relation("SellerFavoritedBy", fields: [sellerId], references: [id], onDelete: Cascade)
+
+  @@unique([buyerId, sellerId])
+  @@index([buyerId])
+  @@index([sellerId])
+}
+
+model ProjectInvite {
+  id        String   @id @default(cuid())
+  projectId String
+  sellerId  String
+  buyerId   String
+  message   String?
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  seller  User    @relation("InvitedSeller", fields: [sellerId], references: [id], onDelete: Cascade)
+  buyer   User    @relation("InviteSender", fields: [buyerId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, sellerId])
+  @@index([sellerId])
+  @@index([buyerId])
 }
