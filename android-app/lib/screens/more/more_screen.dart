@@ -26,6 +26,34 @@ class MoreScreen extends ConsumerWidget {
             title: const Text('Notifications'),
             onTap: () => context.push('/notifications'),
           ),
+          if (user.isBuyer || user.isAdmin) ...[
+            ListTile(
+              leading: const Icon(Icons.people_outline),
+              title: const Text('Talent'),
+              onTap: () => context.push('/talent'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.storefront_outlined),
+              title: const Text('Service catalog'),
+              onTap: () => context.push('/catalog'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.favorite_outline),
+              title: const Text('Favorites'),
+              onTap: () => context.push('/favorites'),
+            ),
+          ],
+          if (user.isSeller)
+            ListTile(
+              leading: const Icon(Icons.storefront_outlined),
+              title: const Text('Service catalog'),
+              onTap: () => context.push('/catalog'),
+            ),
+          ListTile(
+            leading: const Icon(Icons.gavel_outlined),
+            title: const Text('Disputes'),
+            onTap: () => context.push('/disputes'),
+          ),
           if (user.isSeller)
             ListTile(
               leading: const Icon(Icons.account_balance_wallet_outlined),
@@ -41,8 +69,10 @@ class MoreScreen extends ConsumerWidget {
           ListTile(
             leading: const Icon(Icons.open_in_browser),
             title: const Text('Open full website'),
-            subtitle: const Text('Disputes, catalog, advanced admin tools'),
-            onTap: () => launchUrl(Uri.parse('$kApiBase/dashboard'), mode: LaunchMode.externalApplication),
+            onTap: () => launchUrl(
+              Uri.parse('$kApiBase/dashboard'),
+              mode: LaunchMode.externalApplication,
+            ),
           ),
           const Divider(),
           ListTile(

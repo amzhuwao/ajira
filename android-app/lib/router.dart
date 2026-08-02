@@ -17,8 +17,11 @@ import '../screens/wallet/wallet_screen.dart';
 import '../screens/escrow/escrow_screen.dart';
 import '../screens/notifications/notifications_screen.dart';
 import '../screens/profile/profile_screen.dart';
-import '../screens/admin/admin_home_screen.dart';
+import '../screens/admin/admin_screens.dart';
 import '../screens/more/more_screen.dart';
+import '../screens/talent/talent_screen.dart';
+import '../screens/catalog/catalog_screen.dart';
+import '../screens/disputes/disputes_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final auth = ref.watch(authControllerProvider);
@@ -44,6 +47,24 @@ final routerProvider = Provider<GoRouter>((ref) {
         routes: [
           GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
           GoRoute(path: '/admin', builder: (_, __) => const AdminHomeScreen()),
+          GoRoute(path: '/admin/users', builder: (_, __) => const AdminUsersScreen()),
+          GoRoute(
+            path: '/admin/users/:id',
+            builder: (_, state) =>
+                AdminUserDetailScreen(userId: state.pathParameters['id']!),
+          ),
+          GoRoute(path: '/admin/escrows', builder: (_, __) => const AdminEscrowsScreen()),
+          GoRoute(
+            path: '/admin/withdrawals',
+            builder: (_, __) => const AdminWithdrawalsScreen(),
+          ),
+          GoRoute(path: '/admin/payments', builder: (_, __) => const AdminPaymentsScreen()),
+          GoRoute(
+            path: '/admin/financials',
+            builder: (_, __) => const AdminFinancialsScreen(),
+          ),
+          GoRoute(path: '/admin/settings', builder: (_, __) => const AdminSettingsScreen()),
+          GoRoute(path: '/admin/audit', builder: (_, __) => const AdminAuditScreen()),
           GoRoute(
             path: '/projects',
             builder: (_, __) => const ProjectsScreen(),
@@ -57,6 +78,20 @@ final routerProvider = Provider<GoRouter>((ref) {
             ],
           ),
           GoRoute(path: '/browse', builder: (_, __) => const BrowseScreen()),
+          GoRoute(path: '/talent', builder: (_, __) => const TalentScreen()),
+          GoRoute(
+            path: '/talent/:id',
+            builder: (_, state) =>
+                SellerProfileScreen(sellerId: state.pathParameters['id']!),
+          ),
+          GoRoute(path: '/catalog', builder: (_, __) => const CatalogScreen()),
+          GoRoute(path: '/favorites', builder: (_, __) => const FavoritesScreen()),
+          GoRoute(path: '/disputes', builder: (_, __) => const DisputesScreen()),
+          GoRoute(
+            path: '/disputes/:id',
+            builder: (_, state) =>
+                DisputeDetailScreen(disputeId: state.pathParameters['id']!),
+          ),
           GoRoute(
             path: '/messages',
             builder: (_, __) => const MessagesScreen(),

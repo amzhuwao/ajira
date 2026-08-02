@@ -57,6 +57,24 @@ class ApiClient {
     }
   }
 
+  Future<Map<String, dynamic>> patch(String path, {Object? data}) async {
+    try {
+      final res = await _dio.patch<Map<String, dynamic>>(path, data: data);
+      return _unwrap(res);
+    } on DioException catch (e) {
+      throw _mapDio(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> put(String path, {Object? data}) async {
+    try {
+      final res = await _dio.put<Map<String, dynamic>>(path, data: data);
+      return _unwrap(res);
+    } on DioException catch (e) {
+      throw _mapDio(e);
+    }
+  }
+
   Map<String, dynamic> _unwrap(Response<Map<String, dynamic>> res) {
     final body = res.data ?? {};
     if (body['error'] is String) {

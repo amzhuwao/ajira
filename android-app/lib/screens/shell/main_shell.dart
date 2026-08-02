@@ -56,7 +56,10 @@ class MainShell extends ConsumerWidget {
 
     final hideNav = location.startsWith('/escrow/') ||
         (location.startsWith('/projects/') && location != '/projects') ||
-        RegExp(r'^/messages/[^/]+').hasMatch(location);
+        RegExp(r'^/messages/[^/]+').hasMatch(location) ||
+        RegExp(r'^/disputes/[^/]+').hasMatch(location) ||
+        RegExp(r'^/talent/[^/]+').hasMatch(location) ||
+        location.startsWith('/admin/');
 
     return Scaffold(
       body: child,
