@@ -8,19 +8,27 @@ const linksByRole: Record<Role, { href: string; label: string }[]> = {
     { href: "/dashboard/projects", label: "My projects" },
     { href: "/dashboard/projects/new", label: "Post project" },
     { href: "/dashboard/disputes", label: "Disputes" },
+    { href: "/dashboard/profile", label: "Profile" },
   ],
   SELLER: [
     { href: "/dashboard/seller", label: "Overview" },
     { href: "/dashboard/browse", label: "Browse projects" },
+    { href: "/dashboard/services", label: "Services" },
     { href: "/dashboard/wallet", label: "Wallet" },
     { href: "/dashboard/disputes", label: "Disputes" },
+    { href: "/dashboard/profile", label: "Profile" },
   ],
   ADMIN: [
     { href: "/dashboard/admin", label: "Overview" },
     { href: "/dashboard/admin/escrows", label: "Escrows" },
     { href: "/dashboard/admin/withdrawals", label: "Withdrawals" },
+    { href: "/dashboard/admin/projects", label: "Projects" },
     { href: "/dashboard/admin/users", label: "Users" },
+    { href: "/dashboard/admin/financials", label: "Financials" },
+    { href: "/dashboard/admin/settings", label: "Settings" },
+    { href: "/dashboard/admin/audit", label: "Audit logs" },
     { href: "/dashboard/disputes", label: "Disputes" },
+    { href: "/dashboard/profile", label: "Profile" },
   ],
 };
 

@@ -4,8 +4,9 @@ import { BidStatus, EscrowStatus, ProjectStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { requireRole, requireSession } from "@/lib/utils";
+import { formatMoney, requireRole, requireSession } from "@/lib/utils";
 import { bidSchema, projectSchema } from "@/lib/validations";
+import { getSettingBool } from "@/lib/settings";
 import type { ActionState } from "./auth";
 
 export async function createProjectAction(
@@ -20,6 +21,7 @@ export async function createProjectAction(
     budgetMin: formData.get("budgetMin"),
     budgetMax: formData.get("budgetMax"),
     category: formData.get("category"),
+    timeline: formData.get("timeline") || "FLEXIBLE",
   });
 
   if (!parsed.success) {
@@ -33,6 +35,7 @@ export async function createProjectAction(
       budgetMin: parsed.data.budgetMin,
       budgetMax: parsed.data.budgetMax,
       category: parsed.data.category || null,
+      timeline: parsed.data.timeline,
       buyerId: session.user.id,
       status: ProjectStatus.OPEN,
     },
@@ -56,6 +59,15 @@ export async function placeBidAction(
 
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid bid" };
+  }
+
+  const seller = await prisma.user.findUnique({ where: { id: session.user.id } });
+  if (!seller || seller.status !== "ACTIVE") {
+    return { error: "Your account cannot place bids." };
+  }
+
+  if (await getSettingBool("kyc_required_for_seller", false) && !seller.kycVerified) {
+    return { error: "KYC verification is required before bidding. Contact support." };
   }
 
   const project = await prisma.project.findUnique({
@@ -93,7 +105,10 @@ export async function acceptBidAction(bidId: string): Promise<ActionState> {
 
   const bid = await prisma.bid.findUnique({
     where: { id: bidId },
-    include: { project: true },
+    include: {
+      project: true,
+      seller: { select: { id: true, email: true, name: true } },
+    },
   });
 
   if (!bid || bid.project.buyerId !== session.user.id) {
@@ -104,10 +119,15 @@ export async function acceptBidAction(bidId: string): Promise<ActionState> {
     return { error: "Project is not open." };
   }
 
+  const buyer = await prisma.user.findUnique({
+    where: { id: bid.project.buyerId },
+    select: { email: true, name: true },
+  });
+
   const escrow = await prisma.$transaction(async (tx) => {
     await tx.bid.update({
       where: { id: bid.id },
-      data: { status: BidStatus.ACCEPTED },
+      data: { status: BidStatus.ACCEPTED, respondedAt: new Date() },
     });
 
     await tx.bid.updateMany({
@@ -116,13 +136,14 @@ export async function acceptBidAction(bidId: string): Promise<ActionState> {
         id: { not: bid.id },
         status: BidStatus.PENDING,
       },
-      data: { status: BidStatus.REJECTED },
+      data: { status: BidStatus.REJECTED, respondedAt: new Date() },
     });
 
     await tx.project.update({
       where: { id: bid.projectId },
       data: {
         status: ProjectStatus.IN_PROGRESS,
+        acceptedBidId: bid.id,
       },
     });
 
@@ -138,6 +159,22 @@ export async function acceptBidAction(bidId: string): Promise<ActionState> {
     });
   });
 
+  try {
+    const { sendBidAcceptedEmail } = await import("@/lib/mail");
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://ajira.online";
+    await sendBidAcceptedEmail({
+      sellerEmail: bid.seller.email,
+      sellerName: bid.seller.name,
+      buyerEmail: buyer?.email ?? "",
+      buyerName: buyer?.name ?? "Buyer",
+      projectTitle: bid.project.title,
+      amount: formatMoney(Number(bid.amount)),
+      escrowUrl: `${appUrl}/dashboard/escrow/${escrow.id}`,
+    });
+  } catch (err) {
+    console.error("Bid accepted email failed", err);
+  }
+
   redirect(`/dashboard/escrow/${escrow.id}`);
 }
 
@@ -146,7 +183,10 @@ export async function markDeliveredAction(projectId: string): Promise<ActionStat
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    include: { escrow: true },
+    include: {
+      escrow: true,
+      buyer: { select: { email: true, name: true } },
+    },
   });
 
   if (!project?.escrow || project.escrow.sellerId !== session.user.id) {
@@ -162,6 +202,19 @@ export async function markDeliveredAction(projectId: string): Promise<ActionStat
     data: { status: ProjectStatus.DELIVERED, deliveredAt: new Date() },
   });
 
+  try {
+    const { sendWorkDeliveredEmail } = await import("@/lib/mail");
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://ajira.online";
+    await sendWorkDeliveredEmail({
+      to: project.buyer.email,
+      name: project.buyer.name,
+      projectTitle: project.title,
+      projectUrl: `${appUrl}/dashboard/projects/${project.id}`,
+    });
+  } catch (err) {
+    console.error("Work delivered email failed", err);
+  }
+
   revalidatePath(`/dashboard/projects/${projectId}`);
   revalidatePath(`/dashboard/escrow/${project.escrow.id}`);
   return { success: "Marked as delivered." };
@@ -174,7 +227,11 @@ export async function approveWorkAction(escrowId: string): Promise<ActionState> 
 
   const escrow = await prisma.escrow.findUnique({
     where: { id: escrowId },
-    include: { project: true },
+    include: {
+      project: true,
+      buyer: { select: { email: true, name: true } },
+      seller: { select: { email: true, name: true } },
+    },
   });
 
   if (!escrow || escrow.buyerId !== session.user.id) {
@@ -202,6 +259,7 @@ export async function approveWorkAction(escrowId: string): Promise<ActionState> 
       amount: escrow.amount,
       escrowId: escrow.id,
       description: `Earnings for ${escrow.project.title}`,
+      applyCommission: true,
       tx,
     });
 
@@ -211,7 +269,33 @@ export async function approveWorkAction(escrowId: string): Promise<ActionState> 
       reason: "Wallet credited after buyer approval",
       tx,
     });
+
+    await tx.project.update({
+      where: { id: escrow.projectId },
+      data: { status: ProjectStatus.COMPLETED, completedAt: new Date() },
+    });
   });
+
+  try {
+    const { sendEscrowReleasedEmail } = await import("@/lib/mail");
+    await sendEscrowReleasedEmail({
+      sellerEmail: escrow.seller.email,
+      sellerName: escrow.seller.name,
+      buyerEmail: escrow.buyer.email,
+      buyerName: escrow.buyer.name,
+      projectTitle: escrow.project.title,
+      amount: formatMoney(Number(escrow.amount)),
+    });
+  } catch (err) {
+    console.error("Escrow released email failed", err);
+  }
+
+  try {
+    const { refreshSellerStatistics } = await import("@/lib/stats");
+    await refreshSellerStatistics(escrow.sellerId);
+  } catch (err) {
+    console.error("Stats refresh failed", err);
+  }
 
   revalidatePath(`/dashboard/escrow/${escrowId}`);
   revalidatePath("/dashboard/wallet");

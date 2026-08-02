@@ -1,5 +1,6 @@
 import { Prisma, WalletTxnType } from "@prisma/client";
 import { prisma } from "./prisma";
+import { computeCommission, getSettingNumber } from "./settings";
 
 export async function getOrCreateWallet(userId: string, tx?: Prisma.TransactionClient) {
   const client = tx ?? prisma;
@@ -17,34 +18,69 @@ export async function creditEarnings(params: {
   amount: Prisma.Decimal | number | string;
   escrowId: string;
   description?: string;
+  applyCommission?: boolean;
   tx?: Prisma.TransactionClient;
 }) {
-  const amount = new Prisma.Decimal(params.amount);
-  if (amount.lte(0)) {
+  const gross = new Prisma.Decimal(params.amount);
+  if (gross.lte(0)) {
     throw new Error("Amount must be positive");
   }
 
   const run = async (client: Prisma.TransactionClient) => {
+    let creditAmount = gross;
+    let fee = new Prisma.Decimal(0);
+
+    let commissionPercent = 0;
+    if (params.applyCommission !== false) {
+      commissionPercent = await getSettingNumber("commission_percentage", 10);
+      const computed = computeCommission(Number(gross), commissionPercent);
+      fee = new Prisma.Decimal(computed.fee);
+      creditAmount = new Prisma.Decimal(computed.net);
+
+      await client.escrow.update({
+        where: { id: params.escrowId },
+        data: { feeAmount: fee },
+      });
+    }
+
     await getOrCreateWallet(params.userId, client);
 
-    const wallet = await client.sellerWallet.update({
-      where: { userId: params.userId },
-      data: { balance: { increment: amount } },
-    });
+    if (creditAmount.gt(0)) {
+      const wallet = await client.sellerWallet.update({
+        where: { userId: params.userId },
+        data: { balance: { increment: creditAmount } },
+      });
 
-    await client.walletTransaction.create({
-      data: {
-        userId: params.userId,
-        escrowId: params.escrowId,
-        type: WalletTxnType.CREDIT,
-        amount,
-        balanceAfter: wallet.balance,
-        description: params.description ?? "Project earnings",
-        status: "COMPLETED",
-      },
-    });
+      await client.walletTransaction.create({
+        data: {
+          userId: params.userId,
+          escrowId: params.escrowId,
+          type: WalletTxnType.CREDIT,
+          amount: creditAmount,
+          balanceAfter: wallet.balance,
+          description: params.description ?? "Project earnings",
+          status: "COMPLETED",
+        },
+      });
 
-    return wallet;
+      if (fee.gt(0)) {
+        await client.walletTransaction.create({
+          data: {
+            userId: params.userId,
+            escrowId: params.escrowId,
+            type: WalletTxnType.PLATFORM_FEE,
+            amount: fee,
+            balanceAfter: wallet.balance,
+            description: `Platform commission (${commissionPercent}%)`,
+            status: "COMPLETED",
+          },
+        });
+      }
+
+      return wallet;
+    }
+
+    return getOrCreateWallet(params.userId, client);
   };
 
   if (params.tx) return run(params.tx);

@@ -23,6 +23,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           where: { email: parsed.data.email.toLowerCase() },
         });
         if (!user) return null;
+        if (user.status === "SUSPENDED" || user.status === "BANNED") {
+          return null;
+        }
 
         const valid = await bcrypt.compare(
           parsed.data.password,

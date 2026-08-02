@@ -21,11 +21,24 @@ export default async function NewProjectPage() {
           </label>
           <input className="input" id="title" name="title" required minLength={5} />
         </div>
-        <div>
-          <label className="label" htmlFor="category">
-            Category
-          </label>
-          <input className="input" id="category" name="category" placeholder="Design, Dev, Writing…" />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="label" htmlFor="category">
+              Category
+            </label>
+            <input className="input" id="category" name="category" placeholder="Design, Dev, Writing…" />
+          </div>
+          <div>
+            <label className="label" htmlFor="timeline">
+              Timeline
+            </label>
+            <select className="select" id="timeline" name="timeline" defaultValue="FLEXIBLE">
+              <option value="URGENT">Urgent</option>
+              <option value="SHORT">Short</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="FLEXIBLE">Flexible</option>
+            </select>
+          </div>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div>

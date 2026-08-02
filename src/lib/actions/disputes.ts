@@ -1,16 +1,70 @@
 "use server";
 
-import { DisputeStatus, EscrowStatus } from "@prisma/client";
+import { DisputeStatus, EscrowStatus, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
-import { requireRole, requireSession } from "@/lib/utils";
-import { disputeMessageSchema, disputeSchema } from "@/lib/validations";
-import { transitionEscrow } from "@/lib/escrow";
-import { creditEarnings } from "@/lib/wallet";
-import type { ActionState } from "./auth";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
+import { prisma } from "@/lib/prisma";
+import { requireRole, requireSession } from "@/lib/utils";
+import {
+  disputeMessageSchema,
+  disputeSchema,
+  disputeSplitSchema,
+} from "@/lib/validations";
+import { transitionEscrow } from "@/lib/escrow";
+import { creditEarnings } from "@/lib/wallet";
+import { logAdminAction } from "@/lib/audit";
+import type { ActionState } from "./auth";
+
+async function notifyDisputeOpened(disputeId: string, projectTitle: string) {
+  const dispute = await prisma.dispute.findUnique({
+    where: { id: disputeId },
+    include: {
+      escrow: {
+        include: {
+          buyer: { select: { email: true, name: true } },
+          seller: { select: { email: true, name: true } },
+        },
+      },
+    },
+  });
+  if (!dispute) return;
+  const { sendDisputeOpenedEmail } = await import("@/lib/mail");
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://ajira.online";
+  await sendDisputeOpenedEmail({
+    parties: [dispute.escrow.buyer, dispute.escrow.seller],
+    projectTitle,
+    disputeUrl: `${appUrl}/dashboard/disputes/${disputeId}`,
+  });
+}
+
+async function notifyDisputeResolved(
+  disputeId: string,
+  projectTitle: string,
+  resolution: string,
+) {
+  const dispute = await prisma.dispute.findUnique({
+    where: { id: disputeId },
+    include: {
+      escrow: {
+        include: {
+          buyer: { select: { email: true, name: true } },
+          seller: { select: { email: true, name: true } },
+        },
+      },
+    },
+  });
+  if (!dispute) return;
+  const { sendDisputeResolvedEmail } = await import("@/lib/mail");
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://ajira.online";
+  await sendDisputeResolvedEmail({
+    parties: [dispute.escrow.buyer, dispute.escrow.seller],
+    projectTitle,
+    resolution,
+    disputeUrl: `${appUrl}/dashboard/disputes/${disputeId}`,
+  });
+}
 
 export async function openDisputeAction(
   _prev: ActionState,
@@ -29,6 +83,7 @@ export async function openDisputeAction(
 
   const escrow = await prisma.escrow.findUnique({
     where: { id: parsed.data.escrowId },
+    include: { project: true },
   });
 
   if (!escrow) return { error: "Escrow not found." };
@@ -72,6 +127,12 @@ export async function openDisputeAction(
     });
   });
 
+  try {
+    await notifyDisputeOpened(dispute.id, escrow.project.title);
+  } catch (err) {
+    console.error("Dispute opened email failed", err);
+  }
+
   redirect(`/dashboard/disputes/${dispute.id}`);
 }
 
@@ -112,6 +173,13 @@ export async function addDisputeMessageAction(
     },
   });
 
+  if (dispute.status === DisputeStatus.OPEN && session.user.role === "ADMIN") {
+    await prisma.dispute.update({
+      where: { id: dispute.id },
+      data: { status: DisputeStatus.UNDER_REVIEW },
+    });
+  }
+
   revalidatePath(`/dashboard/disputes/${dispute.id}`);
   return { success: "Message added." };
 }
@@ -139,10 +207,13 @@ export async function uploadEvidenceAction(
 
   const dispute = await prisma.dispute.findUnique({
     where: { id: disputeId },
-    include: { escrow: true },
+    include: { escrow: true, evidence: true },
   });
 
   if (!dispute) return { error: "Dispute not found." };
+  if (dispute.evidence.length >= 5) {
+    return { error: "Maximum 5 evidence files per dispute." };
+  }
 
   const isParty =
     dispute.escrow.buyerId === session.user.id ||
@@ -202,6 +273,7 @@ export async function resolveDisputeAction(
         amount: dispute.escrow.amount,
         escrowId: dispute.escrowId,
         description: `Dispute release: ${dispute.escrow.project.title}`,
+        applyCommission: true,
         tx,
       });
 
@@ -211,6 +283,8 @@ export async function resolveDisputeAction(
           status: DisputeStatus.RESOLVED_RELEASE,
           resolution: note,
           resolvedAt: new Date(),
+          sellerShareAmount: dispute.escrow.amount,
+          buyerShareAmount: 0,
         },
       });
     } else {
@@ -228,12 +302,168 @@ export async function resolveDisputeAction(
           resolution:
             `${note}\n\nManual Paynow refund required in merchant dashboard for reference on this escrow.`,
           resolvedAt: new Date(),
+          buyerShareAmount: dispute.escrow.amount,
+          sellerShareAmount: 0,
         },
       });
     }
   });
 
+  await logAdminAction({
+    adminId: session.user.id,
+    action: resolution === "RELEASE" ? "dispute_release" : "dispute_refund",
+    summary: `Resolved dispute ${disputeId} via ${resolution}`,
+    targetType: "Dispute",
+    targetId: disputeId,
+    newValue: { resolution, note },
+  });
+
+  try {
+    await notifyDisputeResolved(disputeId, dispute.escrow.project.title, resolution);
+  } catch (err) {
+    console.error("Dispute resolved email failed", err);
+  }
+
   revalidatePath(`/dashboard/disputes/${disputeId}`);
   revalidatePath("/dashboard/admin");
   return { success: `Dispute resolved via ${resolution}.` };
+}
+
+export async function resolveDisputeSplitAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireRole("ADMIN");
+
+  const parsed = disputeSplitSchema.safeParse({
+    disputeId: formData.get("disputeId"),
+    buyerSharePercent: formData.get("buyerSharePercent"),
+    note: formData.get("note"),
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid split" };
+  }
+
+  const dispute = await prisma.dispute.findUnique({
+    where: { id: parsed.data.disputeId },
+    include: { escrow: { include: { project: true } } },
+  });
+
+  if (!dispute || dispute.escrow.status !== EscrowStatus.DISPUTED) {
+    return { error: "Dispute not open." };
+  }
+
+  const total = Number(dispute.escrow.amount);
+  const buyerShare =
+    Math.round(total * (parsed.data.buyerSharePercent / 100) * 100) / 100;
+  const sellerShare = Math.round((total - buyerShare) * 100) / 100;
+
+  await prisma.$transaction(async (tx) => {
+    if (sellerShare > 0) {
+      await creditEarnings({
+        userId: dispute.escrow.sellerId,
+        amount: sellerShare,
+        escrowId: dispute.escrowId,
+        description: `Dispute split (seller share): ${dispute.escrow.project.title}`,
+        applyCommission: false,
+        tx,
+      });
+    }
+
+    await transitionEscrow(dispute.escrowId, EscrowStatus.RELEASED, {
+      triggeredBy: "admin",
+      userId: session.user.id,
+      reason: `Split resolution: buyer ${buyerShare}, seller ${sellerShare}`,
+      tx,
+      metadata: { buyerShare, sellerShare },
+    });
+
+    await tx.dispute.update({
+      where: { id: dispute.id },
+      data: {
+        status: DisputeStatus.RESOLVED_SPLIT,
+        resolution: `${parsed.data.note}\n\nSplit: buyer $${buyerShare.toFixed(2)} (refund manually in Paynow), seller $${sellerShare.toFixed(2)} credited to wallet.`,
+        buyerShareAmount: new Prisma.Decimal(buyerShare),
+        sellerShareAmount: new Prisma.Decimal(sellerShare),
+        resolvedAt: new Date(),
+      },
+    });
+  });
+
+  await logAdminAction({
+    adminId: session.user.id,
+    action: "dispute_split",
+    summary: `Split dispute ${dispute.id}: buyer ${buyerShare}, seller ${sellerShare}`,
+    targetType: "Dispute",
+    targetId: dispute.id,
+    newValue: { buyerShare, sellerShare, note: parsed.data.note },
+  });
+
+  try {
+    await notifyDisputeResolved(dispute.id, dispute.escrow.project.title, "SPLIT");
+  } catch (err) {
+    console.error("Dispute split email failed", err);
+  }
+
+  revalidatePath(`/dashboard/disputes/${dispute.id}`);
+  revalidatePath("/dashboard/admin");
+  return { success: "Dispute resolved with split." };
+}
+
+export async function adminMarkEscrowDisputedAction(escrowId: string): Promise<ActionState> {
+  const session = await requireRole("ADMIN");
+
+  const escrow = await prisma.escrow.findUnique({
+    where: { id: escrowId },
+    include: { project: true, dispute: true },
+  });
+
+  if (!escrow) return { error: "Escrow not found." };
+  if (escrow.dispute) return { error: "Dispute already exists." };
+
+  const disputable: EscrowStatus[] = [
+    EscrowStatus.FUNDED,
+    EscrowStatus.RELEASE_REQUESTED,
+    EscrowStatus.REFUND_REQUESTED,
+  ];
+  if (!disputable.includes(escrow.status)) {
+    return { error: "Escrow cannot be marked disputed in its current state." };
+  }
+
+  const dispute = await prisma.$transaction(async (tx) => {
+    await transitionEscrow(escrow.id, EscrowStatus.DISPUTED, {
+      triggeredBy: "admin",
+      userId: session.user.id,
+      reason: "Admin marked escrow as disputed",
+      tx,
+    });
+
+    return tx.dispute.create({
+      data: {
+        escrowId: escrow.id,
+        openedById: session.user.id,
+        reason: "Admin opened dispute for review.",
+        status: DisputeStatus.UNDER_REVIEW,
+        messages: {
+          create: {
+            authorId: session.user.id,
+            body: "Admin opened this dispute for review.",
+          },
+        },
+      },
+    });
+  });
+
+  await logAdminAction({
+    adminId: session.user.id,
+    action: "mark_escrow_disputed",
+    summary: `Marked escrow ${escrowId} disputed`,
+    targetType: "Escrow",
+    targetId: escrowId,
+  });
+
+  revalidatePath(`/dashboard/escrow/${escrowId}`);
+  revalidatePath(`/dashboard/disputes/${dispute.id}`);
+  redirect(`/dashboard/disputes/${dispute.id}`);
 }

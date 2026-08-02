@@ -4,10 +4,11 @@ import { ActionForm } from "@/components/ui/action-form";
 import {
   addDisputeMessageAction,
   resolveDisputeAction,
+  resolveDisputeSplitAction,
   uploadEvidenceAction,
 } from "@/lib/actions/disputes";
 import { prisma } from "@/lib/prisma";
-import { formatDate, requireSession } from "@/lib/utils";
+import { formatDate, formatMoney, requireSession } from "@/lib/utils";
 
 export default async function DisputeDetailPage({
   params,
@@ -49,8 +50,8 @@ export default async function DisputeDetailPage({
       <p className="badge mt-4">{dispute.status}</p>
       <h1 className="mt-3 font-display text-4xl">Dispute</h1>
       <p className="mt-2 text-ink-soft">
-        {dispute.escrow.project.title} · opened by {dispute.openedBy.name} on{" "}
-        {formatDate(dispute.createdAt)}
+        {dispute.escrow.project.title} · {formatMoney(dispute.escrow.amount)} · opened by{" "}
+        {dispute.openedBy.name} on {formatDate(dispute.createdAt)}
       </p>
 
       <section className="panel mt-8">
@@ -112,41 +113,70 @@ export default async function DisputeDetailPage({
       </section>
 
       {isAdmin && open ? (
-        <section className="panel mt-8">
-          <h2 className="font-display text-2xl">Admin resolution</h2>
-          <p className="mt-2 text-sm text-ink-soft">
-            Refunds must also be processed manually in the Paynow merchant dashboard.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <form
-              action={async () => {
-                "use server";
-                await resolveDisputeAction(
-                  dispute.id,
-                  "RELEASE",
-                  "Admin released funds to seller after review.",
-                );
-              }}
-            >
-              <button className="btn btn-primary" type="submit">
-                Resolve: release to seller
-              </button>
-            </form>
-            <form
-              action={async () => {
-                "use server";
-                await resolveDisputeAction(
-                  dispute.id,
-                  "REFUND",
-                  "Admin marked refunded. Complete reversal in Paynow merchant tools.",
-                );
-              }}
-            >
-              <button className="btn btn-secondary" type="submit">
-                Resolve: refund buyer
-              </button>
-            </form>
+        <section className="panel mt-8 space-y-6">
+          <div>
+            <h2 className="font-display text-2xl">Admin resolution</h2>
+            <p className="mt-2 text-sm text-ink-soft">
+              Refunds and buyer split shares must also be processed manually in Paynow.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <form
+                action={async () => {
+                  "use server";
+                  await resolveDisputeAction(
+                    dispute.id,
+                    "RELEASE",
+                    "Admin released funds to seller after review.",
+                  );
+                }}
+              >
+                <button className="btn btn-primary" type="submit">
+                  Release to seller
+                </button>
+              </form>
+              <form
+                action={async () => {
+                  "use server";
+                  await resolveDisputeAction(
+                    dispute.id,
+                    "REFUND",
+                    "Admin marked refunded. Complete reversal in Paynow merchant tools.",
+                  );
+                }}
+              >
+                <button className="btn btn-secondary" type="submit">
+                  Refund buyer
+                </button>
+              </form>
+            </div>
           </div>
+
+          <ActionForm action={resolveDisputeSplitAction} className="flex flex-col gap-3 border-t border-line pt-6">
+            <h3 className="font-display text-xl">Split resolution</h3>
+            <input type="hidden" name="disputeId" value={dispute.id} />
+            <div>
+              <label className="label" htmlFor="buyerSharePercent">
+                Buyer share (%)
+              </label>
+              <input
+                className="input"
+                id="buyerSharePercent"
+                name="buyerSharePercent"
+                type="number"
+                min={1}
+                max={99}
+                defaultValue={50}
+                required
+              />
+            </div>
+            <div>
+              <label className="label" htmlFor="note">Note</label>
+              <textarea className="textarea" id="note" name="note" required minLength={5} defaultValue="Split after reviewing evidence from both parties." />
+            </div>
+            <button className="btn btn-secondary self-start" type="submit">
+              Resolve with split
+            </button>
+          </ActionForm>
         </section>
       ) : null}
     </div>

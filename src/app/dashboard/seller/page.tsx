@@ -8,7 +8,7 @@ export const metadata = { title: "Seller dashboard" };
 export default async function SellerDashboardPage() {
   const session = await requireRole("SELLER", "ADMIN");
 
-  const [openProjects, myBids, wallet] = await Promise.all([
+  const [openProjects, myBids, wallet, me] = await Promise.all([
     prisma.project.findMany({
       where: { status: ProjectStatus.OPEN },
       orderBy: { createdAt: "desc" },
@@ -25,6 +25,10 @@ export default async function SellerDashboardPage() {
       include: { project: true, escrow: true },
     }),
     prisma.sellerWallet.findUnique({ where: { userId: session.user.id } }),
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      include: { statistics: true, _count: { select: { services: true, reviewsReceived: true } } },
+    }),
   ]);
 
   return (
@@ -35,6 +39,17 @@ export default async function SellerDashboardPage() {
           <p className="mt-2 text-ink-soft">
             Browse open projects, bid, deliver, and manage your wallet.
           </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Link href="/dashboard/profile" className="btn btn-secondary">
+              Edit profile
+            </Link>
+            <Link href={`/dashboard/sellers/${session.user.id}`} className="btn btn-ghost">
+              Public profile
+            </Link>
+            <Link href="/dashboard/services" className="btn btn-ghost">
+              Services ({me?._count.services ?? 0})
+            </Link>
+          </div>
         </div>
         <div className="panel min-w-[200px]">
           <div className="text-xs uppercase tracking-[0.12em] text-ink-soft">
@@ -49,6 +64,29 @@ export default async function SellerDashboardPage() {
         </div>
       </div>
 
+      {me?.statistics ? (
+        <div className="mt-8 grid gap-3 sm:grid-cols-4">
+          <div className="panel">
+            <div className="text-xs uppercase tracking-[0.12em] text-ink-soft">Rating</div>
+            <div className="font-display text-2xl">
+              {Number(me.statistics.averageRating).toFixed(1)}★
+            </div>
+          </div>
+          <div className="panel">
+            <div className="text-xs uppercase tracking-[0.12em] text-ink-soft">Jobs done</div>
+            <div className="font-display text-2xl">{me.statistics.completedJobs}</div>
+          </div>
+          <div className="panel">
+            <div className="text-xs uppercase tracking-[0.12em] text-ink-soft">Reviews</div>
+            <div className="font-display text-2xl">{me._count.reviewsReceived}</div>
+          </div>
+          <div className="panel">
+            <div className="text-xs uppercase tracking-[0.12em] text-ink-soft">Profile views</div>
+            <div className="font-display text-2xl">{me.profileViews}</div>
+          </div>
+        </div>
+      ) : null}
+
       <section id="browse" className="mt-10">
         <h2 className="font-display text-2xl">Open projects</h2>
         <div className="table-wrap mt-4 panel">
@@ -58,6 +96,7 @@ export default async function SellerDashboardPage() {
                 <th>Project</th>
                 <th>Buyer</th>
                 <th>Budget</th>
+                <th>Timeline</th>
                 <th>Bids</th>
               </tr>
             </thead>
@@ -80,6 +119,7 @@ export default async function SellerDashboardPage() {
                     {formatMoney(Number(project.budgetMin))} –{" "}
                     {formatMoney(Number(project.budgetMax))}
                   </td>
+                  <td>{project.timeline}</td>
                   <td>{project._count.bids}</td>
                 </tr>
               ))}

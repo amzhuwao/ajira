@@ -1,7 +1,6 @@
-import { ActionForm } from "@/components/ui/action-form";
-import { openDisputeAction } from "@/lib/actions/disputes";
+import { OpenDisputeForm } from "@/components/disputes/open-dispute-form";
 import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/utils";
+import { formatMoney, requireSession } from "@/lib/utils";
 import { notFound } from "next/navigation";
 
 export const metadata = { title: "Open dispute" };
@@ -31,21 +30,10 @@ export default async function NewDisputePage({
     <div className="mx-auto max-w-2xl">
       <h1 className="font-display text-4xl">Open a dispute</h1>
       <p className="mt-2 text-ink-soft">
-        For {escrow.project.title}. An admin will review evidence and decide release
-        or refund.
+        For {escrow.project.title} ({formatMoney(escrow.amount)}). An admin will review
+        evidence and can release, refund, or split funds.
       </p>
-      <ActionForm action={openDisputeAction} className="panel mt-8 flex flex-col gap-4">
-        <input type="hidden" name="escrowId" value={escrow.id} />
-        <div>
-          <label className="label" htmlFor="reason">
-            What went wrong?
-          </label>
-          <textarea className="textarea" id="reason" name="reason" required minLength={20} />
-        </div>
-        <button className="btn btn-primary self-start" type="submit">
-          Submit dispute
-        </button>
-      </ActionForm>
+      <OpenDisputeForm escrowId={escrow.id} />
     </div>
   );
 }

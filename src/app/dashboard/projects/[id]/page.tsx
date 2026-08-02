@@ -6,6 +6,7 @@ import {
   markDeliveredAction,
   placeBidAction,
 } from "@/lib/actions/projects";
+import { submitReviewAction } from "@/lib/actions/reviews";
 import { prisma } from "@/lib/prisma";
 import { formatDate, formatMoney, requireSession } from "@/lib/utils";
 
@@ -26,6 +27,9 @@ export default async function ProjectDetailPage({
         orderBy: { createdAt: "desc" },
       },
       escrow: true,
+      reviews: {
+        include: { reviewer: { select: { name: true } } },
+      },
     },
   });
 
@@ -35,6 +39,11 @@ export default async function ProjectDetailPage({
   const isSeller = session.user.role === "SELLER";
   const myBid = project.bids.find((b) => b.sellerId === session.user.id);
   const acceptedBid = project.bids.find((b) => b.status === "ACCEPTED");
+  const existingReview = project.reviews.find((r) => r.reviewerId === session.user.id);
+  const canReview =
+    isBuyer &&
+    !existingReview &&
+    (project.status === "COMPLETED" || project.escrow?.status === "RELEASED");
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -46,7 +55,8 @@ export default async function ProjectDetailPage({
           <p className="badge">{project.status}</p>
           <h1 className="mt-3 font-display text-4xl">{project.title}</h1>
           <p className="mt-2 text-ink-soft">
-            Posted by {project.buyer.name} · {formatDate(project.createdAt)}
+            Posted by {project.buyer.name} · {formatDate(project.createdAt)} ·{" "}
+            {project.timeline}
           </p>
         </div>
         <div className="panel">
@@ -60,11 +70,16 @@ export default async function ProjectDetailPage({
       <section className="panel mt-8">
         <h2 className="font-display text-2xl">Brief</h2>
         <p className="mt-3 whitespace-pre-wrap text-ink-soft">{project.description}</p>
-        {project.category ? (
-          <p className="mt-4 text-sm">
-            Category: <strong>{project.category}</strong>
+        <div className="mt-4 flex flex-wrap gap-4 text-sm">
+          {project.category ? (
+            <p>
+              Category: <strong>{project.category}</strong>
+            </p>
+          ) : null}
+          <p>
+            Timeline: <strong>{project.timeline}</strong>
           </p>
-        ) : null}
+        </div>
       </section>
 
       {project.escrow ? (
@@ -75,7 +90,11 @@ export default async function ProjectDetailPage({
         </div>
       ) : null}
 
-      {isSeller && acceptedBid?.sellerId === session.user.id && project.escrow?.status === "FUNDED" && project.status === "IN_PROGRESS" ? (
+      {isSeller &&
+      acceptedBid?.sellerId === session.user.id &&
+      project.escrow?.status === "FUNDED" &&
+      (project.status === "IN_PROGRESS" || project.status === "DELIVERED") &&
+      project.status !== "DELIVERED" ? (
         <form
           action={async () => {
             "use server";
@@ -134,7 +153,12 @@ export default async function ProjectDetailPage({
             <div key={bid.id} className="panel">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <div className="font-semibold">{bid.seller.name}</div>
+                  <Link
+                    href={`/dashboard/sellers/${bid.seller.id}`}
+                    className="font-semibold text-forest"
+                  >
+                    {bid.seller.name}
+                  </Link>
                   <div className="text-sm text-ink-soft">
                     {formatMoney(Number(bid.amount))} · {bid.deliveryDays} days · {bid.status}
                   </div>
@@ -157,6 +181,53 @@ export default async function ProjectDetailPage({
           ))}
         </div>
       </section>
+
+      {canReview ? (
+        <section className="panel mt-10">
+          <h2 className="font-display text-2xl">Leave a review</h2>
+          <ActionForm action={submitReviewAction} className="mt-4 flex flex-col gap-3">
+            <input type="hidden" name="projectId" value={project.id} />
+            <div>
+              <label className="label" htmlFor="rating">Rating</label>
+              <select className="select" id="rating" name="rating" defaultValue="5" required>
+                {[5, 4, 3, 2, 1].map((n) => (
+                  <option key={n} value={n}>{n} stars</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label" htmlFor="comment">Comment</label>
+              <textarea className="textarea" id="comment" name="comment" />
+            </div>
+            <button className="btn btn-primary self-start" type="submit">
+              Submit review
+            </button>
+          </ActionForm>
+        </section>
+      ) : null}
+
+      {project.reviews.length > 0 ? (
+        <section className="mt-10">
+          <h2 className="font-display text-2xl">Reviews</h2>
+          <div className="mt-4 space-y-3">
+            {project.reviews.map((review) => (
+              <div key={review.id} className="panel">
+                <div className="font-semibold">
+                  {review.rating}★ · {review.reviewer.name}
+                </div>
+                {review.comment ? (
+                  <p className="mt-2 text-sm text-ink-soft whitespace-pre-wrap">{review.comment}</p>
+                ) : null}
+                {review.replyText ? (
+                  <p className="mt-3 rounded-xl bg-sand/50 p-3 text-sm">
+                    <strong>Seller reply:</strong> {review.replyText}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

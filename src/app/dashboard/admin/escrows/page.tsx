@@ -1,15 +1,12 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { Role } from "@prisma/client";
-import { auth } from "@/lib/auth";
+import { adminMarkEscrowDisputedAction } from "@/lib/actions/disputes";
 import { prisma } from "@/lib/prisma";
-import { formatDate, formatMoney } from "@/lib/utils";
+import { formatDate, formatMoney, requireRole } from "@/lib/utils";
+
+export const metadata = { title: "Admin escrows" };
 
 export default async function AdminEscrowsPage() {
-  const session = await auth();
-  if (!session?.user || session.user.role !== Role.ADMIN) {
-    redirect("/dashboard");
-  }
+  await requireRole("ADMIN");
 
   const escrows = await prisma.escrow.findMany({
     orderBy: { createdAt: "desc" },
@@ -18,26 +15,52 @@ export default async function AdminEscrowsPage() {
       project: true,
       buyer: { select: { name: true } },
       seller: { select: { name: true } },
+      dispute: { select: { id: true } },
     },
   });
 
   return (
-    <div>
-      <h1 className="font-display text-3xl">Escrows</h1>
+    <div className="mx-auto max-w-5xl">
+      <h1 className="font-display text-4xl">Escrows</h1>
       <div className="mt-8 space-y-3">
         {escrows.map((e) => (
-          <Link key={e.id} href={`/dashboard/escrow/${e.id}`} className="card block hover:border-forest">
-            <div className="flex justify-between gap-3">
+          <div key={e.id} className="panel">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <div className="font-semibold">{e.project.title}</div>
+                <Link href={`/dashboard/escrow/${e.id}`} className="font-semibold text-forest">
+                  {e.project.title}
+                </Link>
                 <div className="text-sm text-ink-soft">
-                  {formatMoney(e.amount)} · {e.buyer.name} → {e.seller.name} ·{" "}
-                  {formatDate(e.createdAt)}
+                  {formatMoney(e.amount)}
+                  {Number(e.feeAmount) > 0 ? ` · fee ${formatMoney(e.feeAmount)}` : ""}
+                  {" · "}
+                  {e.buyer.name} → {e.seller.name} · {formatDate(e.createdAt)}
                 </div>
               </div>
               <span className="badge">{e.status}</span>
             </div>
-          </Link>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link href={`/dashboard/escrow/${e.id}`} className="btn btn-ghost">
+                Open
+              </Link>
+              {e.dispute ? (
+                <Link href={`/dashboard/disputes/${e.dispute.id}`} className="btn btn-secondary">
+                  View dispute
+                </Link>
+              ) : ["FUNDED", "RELEASE_REQUESTED", "REFUND_REQUESTED"].includes(e.status) ? (
+                <form
+                  action={async () => {
+                    "use server";
+                    await adminMarkEscrowDisputedAction(e.id);
+                  }}
+                >
+                  <button className="btn btn-secondary" type="submit">
+                    Mark disputed
+                  </button>
+                </form>
+              ) : null}
+            </div>
+          </div>
         ))}
       </div>
     </div>

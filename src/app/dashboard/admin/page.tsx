@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { refreshStatsAction } from "@/lib/actions/admin";
 import { processWithdrawalAction } from "@/lib/actions/payments";
 import { prisma } from "@/lib/prisma";
 import { formatDate, formatMoney, requireRole } from "@/lib/utils";
@@ -48,10 +49,27 @@ export default async function AdminDashboardPage() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="font-display text-4xl">Admin overview</h1>
-      <p className="mt-2 text-ink-soft">
-        Platform health, escrow oversight, withdrawals, and disputes.
-      </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="font-display text-4xl">Admin overview</h1>
+          <p className="mt-2 text-ink-soft">
+            Platform health, escrow oversight, withdrawals, and disputes.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/dashboard/admin/financials" className="btn btn-secondary">Financials</Link>
+          <Link href="/dashboard/admin/settings" className="btn btn-ghost">Settings</Link>
+          <Link href="/dashboard/admin/audit" className="btn btn-ghost">Audit</Link>
+          <form
+            action={async () => {
+              "use server";
+              await refreshStatsAction();
+            }}
+          >
+            <button className="btn btn-ghost" type="submit">Refresh seller stats</button>
+          </form>
+        </div>
+      </div>
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         {[

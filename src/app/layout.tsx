@@ -1,5 +1,6 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { DM_Sans, Fraunces } from "next/font/google";
+import { PwaRegister } from "@/components/pwa-register";
 import "./globals.css";
 
 const fraunces = Fraunces({
@@ -21,6 +22,16 @@ export const metadata: Metadata = {
   },
   description:
     "Ajira connects buyers and freelancers across Zimbabwe with Paynow-powered escrow, wallets, and clear dispute resolution.",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    title: "Ajira",
+    statusBarStyle: "default",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#1a5c45",
 };
 
 export default function RootLayout({
@@ -32,6 +43,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${fraunces.variable} ${dmSans.variable} antialiased`}>
         {children}
+        <PwaRegister />
       </body>
     </html>
   );

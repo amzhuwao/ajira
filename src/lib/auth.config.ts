@@ -51,7 +51,11 @@ export const authConfig = {
     authorized({ auth, request }) {
       const { pathname } = request.nextUrl;
       const isLoggedIn = !!auth?.user;
-      const isAuthPage = pathname === "/login" || pathname === "/register";
+      const isAuthPage =
+        pathname === "/login" ||
+        pathname === "/register" ||
+        pathname === "/forgot-password" ||
+        pathname === "/reset-password";
       const isDashboard = pathname.startsWith("/dashboard");
 
       if (isDashboard) return isLoggedIn;
