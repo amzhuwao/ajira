@@ -1,34 +1,31 @@
-# Ajira Android companion
+# Ajira Android companion (native)
 
-Flutter WebView shell for [https://ajira.online](https://ajira.online).
+Flutter native app for [https://ajira.online](https://ajira.online) — not a WebView shell.
 
 - **Package ID:** `online.ajira.app`
+- **API:** `https://ajira.online/api/mobile/v1`
 - **Min SDK:** 24 · **Target SDK:** 35
+
+## Features (v2)
+
+- Email/password auth with Bearer JWT
+- Role home (buyer / seller / admin)
+- Projects, bids, browse, messages, wallet
+- Escrow funding via Paynow **in-app browser** (Custom Tabs) or Ecocash/OneMoney poll
+- Notifications + profile entry points
 
 ## Local develop
 
 ```bash
 cd android-app
 flutter pub get
-flutter run
+flutter run --dart-define=API_BASE=https://ajira.online
 ```
 
 ## Build on the droplet
 
-The DigitalOcean host already has Flutter (`/opt/flutter`) and Android SDK (`/opt/android-sdk`).
-
 ```bash
-# from repo root on the droplet
 ./android-app/scripts/build-on-droplet.sh
 ```
 
-The script runs `flutter build apk --release` and copies the APK to:
-
-- Direct file: [https://ajira.online/app/ajira.apk](https://ajira.online/app/ajira.apk)
-- Landing page: [https://ajira.online/download](https://ajira.online/download)
-
-## Notes
-
-- Release builds currently use the debug keystore for internal distribution.
-- For Play Store, create a keystore outside git and wire `signingConfigs` in `android/app/build.gradle.kts`.
-- Digital Asset Links for verified App Links can be added later at `/.well-known/assetlinks.json`.
+Publishes: [https://ajira.online/app/ajira.apk](https://ajira.online/app/ajira.apk)

@@ -1,18 +1,24 @@
 name: ajira_companion
-description: Ajira Android companion — WebView shell for https://ajira.online
+description: Ajira native Android companion for the freelance marketplace
 publish_to: "none"
-version: 1.0.0+1
+version: 2.0.0+2
 
 environment:
-  sdk: ^3.12.2
+  sdk: ^3.5.0
 
 dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  webview_flutter: ^4.13.0
-  webview_flutter_android: ^4.7.0
+  dio: ^5.8.0+1
+  flutter_secure_storage: ^9.2.4
+  flutter_riverpod: ^2.6.1
+  go_router: ^14.8.1
+  google_fonts: ^6.2.1
+  intl: ^0.20.2
   url_launcher: ^6.3.2
+  flutter_custom_tabs: ^2.1.0
+  cached_network_image: ^3.4.1
 
 dev_dependencies:
   flutter_test:
