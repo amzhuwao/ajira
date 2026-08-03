@@ -4,12 +4,17 @@ import { EscrowStatus, ProjectStatus, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/utils";
-import { platformSettingsSchema } from "@/lib/validations";
-import { ensureDefaultSettings, setSetting } from "@/lib/settings";
+import { platformSettingsSchema, paynowGatewaySchema } from "@/lib/validations";
+import { ensureDefaultSettings, getSetting, setSetting } from "@/lib/settings";
 import { logAdminAction } from "@/lib/audit";
 import { refreshSellerStatistics } from "@/lib/stats";
 import { creditEarnings, creditEscrowRefund, getOrCreateWallet } from "@/lib/wallet";
 import { transitionEscrow } from "@/lib/escrow";
+import {
+  getPaynowStatusSummary,
+  testPaynowHash,
+  testPaynowLiveInitiate,
+} from "@/lib/paynow";
 import type { ActionState } from "./auth";
 
 export async function updatePlatformSettingsAction(
@@ -334,5 +339,114 @@ export async function adminRefundEscrowAction(
       escrow.fundingSource === "WALLET"
         ? "Escrow refunded to buyer wallet."
         : "Escrow marked refunded. Process the Paynow refund in the merchant dashboard.",
+  };
+}
+
+export async function updatePaynowGatewayAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireRole("ADMIN");
+
+  const parsed = paynowGatewaySchema.safeParse({
+    paynow_enabled: formData.get("paynow_enabled") ?? "true",
+    paynow_integration_id: formData.get("paynow_integration_id") ?? "",
+    paynow_integration_key: formData.get("paynow_integration_key") ?? "",
+    paynow_result_url: formData.get("paynow_result_url") ?? "",
+    paynow_return_url: formData.get("paynow_return_url") ?? "",
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid gateway settings" };
+  }
+
+  const existingKey = await getSetting("paynow_integration_key", "");
+  const nextKey = parsed.data.paynow_integration_key?.trim() || existingKey;
+
+  await setSetting("paynow_enabled", parsed.data.paynow_enabled);
+  await setSetting("paynow_integration_id", parsed.data.paynow_integration_id.trim());
+  await setSetting("paynow_integration_key", nextKey);
+  await setSetting("paynow_result_url", parsed.data.paynow_result_url.trim());
+  await setSetting("paynow_return_url", parsed.data.paynow_return_url.trim());
+
+  await logAdminAction({
+    adminId: session.user.id,
+    action: "update_paynow_gateway",
+    summary: "Updated Paynow gateway settings",
+    targetType: "PlatformSetting",
+    newValue: {
+      enabled: parsed.data.paynow_enabled,
+      integrationId: parsed.data.paynow_integration_id.trim(),
+      keyUpdated: Boolean(parsed.data.paynow_integration_key?.trim()),
+      resultUrl: parsed.data.paynow_result_url.trim(),
+      returnUrl: parsed.data.paynow_return_url.trim(),
+    },
+  });
+
+  revalidatePath("/dashboard/admin/gateway");
+  return { success: "Payment gateway settings saved." };
+}
+
+export async function testPaynowGatewayAction(
+  _prev: ActionState & {
+    testKind?: string;
+    redirectUrl?: string;
+    reference?: string;
+  },
+  formData: FormData,
+): Promise<
+  ActionState & {
+    testKind?: string;
+    redirectUrl?: string;
+    reference?: string;
+  }
+> {
+  const session = await requireRole("ADMIN");
+  const kind = String(formData.get("kind") ?? "status");
+
+  if (kind === "hash") {
+    const result = await testPaynowHash();
+    await logAdminAction({
+      adminId: session.user.id,
+      action: "test_paynow_hash",
+      summary: result.message,
+      targetType: "Paynow",
+      newValue: { ok: result.ok },
+    });
+    return result.ok
+      ? { success: result.message, testKind: "hash" }
+      : { error: result.message, testKind: "hash" };
+  }
+
+  if (kind === "live") {
+    const result = await testPaynowLiveInitiate({ email: session.user.email });
+    await logAdminAction({
+      adminId: session.user.id,
+      action: "test_paynow_live",
+      summary: result.message,
+      targetType: "Paynow",
+      newValue: {
+        ok: result.ok,
+        reference: result.reference,
+      },
+    });
+    return result.ok
+      ? {
+          success: result.message,
+          testKind: "live",
+          redirectUrl: result.redirectUrl,
+          reference: result.reference,
+        }
+      : { error: result.message, testKind: "live", reference: result.reference };
+  }
+
+  const status = await getPaynowStatusSummary();
+  return {
+    success: status.ready
+      ? "Gateway is ready (credentials present and enabled)."
+      : status.configured
+        ? "Credentials present but gateway is disabled."
+        : "Gateway is not configured.",
+    testKind: "status",
   };
 }

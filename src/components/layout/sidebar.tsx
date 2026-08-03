@@ -101,6 +101,7 @@ const sectionsByRole: Record<Role, NavSection[]> = {
         { href: "/dashboard/admin/financials", label: "Financials" },
         { href: "/dashboard/admin/withdrawals", label: "Withdrawals" },
         { href: "/dashboard/admin/payments", label: "Payments" },
+        { href: "/dashboard/admin/gateway", label: "Payment gateway" },
       ],
     },
     {

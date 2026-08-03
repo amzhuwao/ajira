@@ -13,6 +13,7 @@ const TOOLS = [
   { href: "/dashboard/admin/disputes", title: "Disputes", desc: "Triage and resolve" },
   { href: "/dashboard/admin/financials", title: "Financials", desc: "Fees and wallets" },
   { href: "/dashboard/admin/payments", title: "Payments", desc: "Paynow attempts" },
+  { href: "/dashboard/admin/gateway", title: "Payment gateway", desc: "Credentials and tests" },
   { href: "/dashboard/admin/withdrawals", title: "Withdrawals", desc: "Seller payouts" },
   { href: "/dashboard/admin/settings", title: "Settings", desc: "Fees and policy" },
   { href: "/dashboard/admin/audit", title: "Audit logs", desc: "Admin activity" },

@@ -355,7 +355,7 @@ export async function mobileAcceptBid(request: Request, bidId: string) {
 export async function mobileFundEscrow(request: Request) {
   try {
     const user = await requireMobileAuth(request, ["BUYER", "ADMIN"]);
-    if (!isPaynowConfigured()) {
+    if (!(await isPaynowConfigured())) {
       throw new MobileAuthError(503, "Paynow is not configured on the server");
     }
 

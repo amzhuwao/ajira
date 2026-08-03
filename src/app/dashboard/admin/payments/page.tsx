@@ -65,10 +65,17 @@ export default async function AdminPaymentsPage({
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="font-display text-4xl">Payments</h1>
-      <p className="mt-2 text-ink-soft">
-        Paynow escrow funding attempts — watch for stuck SENT or FAILED payments.
-      </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="font-display text-4xl">Payments</h1>
+          <p className="mt-2 text-ink-soft">
+            Paynow escrow funding attempts — watch for stuck SENT or FAILED payments.
+          </p>
+        </div>
+        <Link href="/dashboard/admin/gateway" className="btn btn-secondary">
+          Gateway settings
+        </Link>
+      </div>
 
       <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {STATUSES.filter((s) => s !== "ALL").map((s) => (

@@ -36,10 +36,10 @@ export async function fundEscrowAction(
 ): Promise<ActionState & { instructions?: string; paymentId?: string }> {
   const session = await requireRole("BUYER", "ADMIN");
 
-  if (!isPaynowConfigured()) {
+  if (!(await isPaynowConfigured())) {
     return {
       error:
-        "Paynow is not configured. Set PAYNOW_INTEGRATION_ID and PAYNOW_INTEGRATION_KEY.",
+        "Paynow is not configured. An admin must set credentials under Payment gateway.",
     };
   }
 
@@ -264,10 +264,10 @@ export async function topUpWalletAction(
 ): Promise<ActionState & { instructions?: string; topUpId?: string }> {
   const session = await requireRole("BUYER", "ADMIN");
 
-  if (!isPaynowConfigured()) {
+  if (!(await isPaynowConfigured())) {
     return {
       error:
-        "Paynow is not configured. Set PAYNOW_INTEGRATION_ID and PAYNOW_INTEGRATION_KEY.",
+        "Paynow is not configured. An admin must set credentials under Payment gateway.",
     };
   }
 

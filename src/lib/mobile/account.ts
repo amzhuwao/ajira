@@ -152,7 +152,7 @@ export async function mobileGetWallet(request: Request) {
 export async function mobileTopUpWallet(request: Request) {
   try {
     const user = await requireMobileAuth(request, ["BUYER", "ADMIN"]);
-    if (!isPaynowConfigured()) {
+    if (!(await isPaynowConfigured())) {
       throw new MobileAuthError(400, "Paynow is not configured.");
     }
     const body = await readJsonBody<{

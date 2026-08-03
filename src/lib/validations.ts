@@ -199,3 +199,21 @@ export const platformSettingsSchema = z.object({
   tos_text: z.string().max(20000),
   privacy_text: z.string().max(20000),
 });
+
+export const paynowGatewaySchema = z.object({
+  paynow_enabled: z.enum(["true", "false"]),
+  paynow_integration_id: z.string().max(200),
+  paynow_integration_key: z.string().max(500).optional().or(z.literal("")),
+  paynow_result_url: z
+    .string()
+    .max(500)
+    .refine((v) => !v || /^https?:\/\//i.test(v), {
+      message: "Result URL must start with http:// or https://",
+    }),
+  paynow_return_url: z
+    .string()
+    .max(500)
+    .refine((v) => !v || /^https?:\/\//i.test(v), {
+      message: "Return URL must start with http:// or https://",
+    }),
+});
