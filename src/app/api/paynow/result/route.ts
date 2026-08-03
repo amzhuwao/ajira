@@ -3,6 +3,7 @@ import { EscrowStatus, PaymentStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { pollPayment, verifyPaynowHash } from "@/lib/paynow";
 import { transitionEscrow } from "@/lib/escrow";
+import { creditTopUp } from "@/lib/wallet";
 
 export async function POST(request: NextRequest) {
   const contentType = request.headers.get("content-type") ?? "";
@@ -22,13 +23,56 @@ export async function POST(request: NextRequest) {
     const valid = await verifyPaynowHash(payload, hash);
     if (!valid) {
       console.warn("Paynow result hash mismatch", payload.reference);
-      // Still poll to confirm — do not trust payload alone
     }
   }
 
   const reference = payload.reference ?? payload.Reference;
   if (!reference) {
     return NextResponse.json({ error: "Missing reference" }, { status: 400 });
+  }
+
+  // Wallet top-up
+  const topUp = await prisma.walletTopUp.findUnique({
+    where: { merchantReference: reference },
+  });
+  if (topUp) {
+    if (topUp.creditedAt) {
+      return NextResponse.json({ ok: true, status: "already_credited" });
+    }
+
+    let paid = ["Paid", "Awaiting Delivery", "Delivered"].includes(
+      payload.status ?? payload.Status ?? "",
+    );
+
+    if (topUp.pollUrl) {
+      try {
+        const polled = await pollPayment(topUp.pollUrl);
+        paid = polled.paid || paid;
+        await prisma.walletTopUp.update({
+          where: { id: topUp.id },
+          data: {
+            rawStatus: polled.status || payload.status,
+            paynowReference: polled.paynowReference
+              ? String(polled.paynowReference)
+              : payload.paynowreference ?? topUp.paynowReference,
+            status: paid ? PaymentStatus.PAID : topUp.status,
+          },
+        });
+      } catch (error) {
+        console.error("Paynow top-up poll failed", error);
+      }
+    }
+
+    if (paid) {
+      await creditTopUp({
+        userId: topUp.userId,
+        amount: topUp.amount,
+        topUpId: topUp.id,
+        description: "Wallet top-up via Paynow",
+      });
+    }
+
+    return NextResponse.json({ ok: true });
   }
 
   const payment = await prisma.escrowPayment.findUnique({
@@ -40,7 +84,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unknown payment" }, { status: 404 });
   }
 
-  // Idempotent: already funded
   if (payment.escrow.status === EscrowStatus.FUNDED || payment.status === PaymentStatus.PAID) {
     return NextResponse.json({ ok: true, status: "already_funded" });
   }
@@ -76,6 +119,10 @@ export async function POST(request: NextRequest) {
   }
 
   if (paid && payment.escrow.status === EscrowStatus.PENDING) {
+    await prisma.escrow.update({
+      where: { id: payment.escrowId },
+      data: { fundingSource: "PAYNOW" },
+    });
     await transitionEscrow(payment.escrowId, EscrowStatus.FUNDED, {
       triggeredBy: "paynow_result",
       reason: "Payment confirmed via Paynow result URL",
@@ -86,6 +133,5 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Paynow does not require a specific response body
   return NextResponse.json({ ok: true });
 }

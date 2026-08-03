@@ -39,6 +39,7 @@ const sectionsByRole: Record<Role, NavSection[]> = {
       id: "account",
       label: "Account",
       items: [
+        { href: "/dashboard/wallet", label: "Wallet" },
         { href: "/dashboard/notifications", label: "Notifications" },
         { href: "/dashboard/profile", label: "Profile" },
       ],

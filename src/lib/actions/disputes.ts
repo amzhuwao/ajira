@@ -13,7 +13,7 @@ import {
   disputeSplitSchema,
 } from "@/lib/validations";
 import { transitionEscrow } from "@/lib/escrow";
-import { creditEarnings } from "@/lib/wallet";
+import { creditEarnings, creditEscrowRefund } from "@/lib/wallet";
 import { logAdminAction } from "@/lib/audit";
 import type { ActionState } from "./auth";
 
@@ -295,12 +295,24 @@ export async function resolveDisputeAction(
         tx,
       });
 
+      if (dispute.escrow.fundingSource === "WALLET") {
+        await creditEscrowRefund({
+          userId: dispute.escrow.buyerId,
+          amount: dispute.escrow.amount,
+          escrowId: dispute.escrowId,
+          description: `Dispute refund to wallet: ${dispute.escrow.project.title}`,
+          tx,
+        });
+      }
+
       await tx.dispute.update({
         where: { id: disputeId },
         data: {
           status: DisputeStatus.RESOLVED_REFUND,
           resolution:
-            `${note}\n\nManual Paynow refund required in merchant dashboard for reference on this escrow.`,
+            dispute.escrow.fundingSource === "WALLET"
+              ? note
+              : `${note}\n\nManual Paynow refund required in merchant dashboard for reference on this escrow.`,
           resolvedAt: new Date(),
           buyerShareAmount: dispute.escrow.amount,
           sellerShareAmount: 0,
@@ -371,6 +383,16 @@ export async function resolveDisputeSplitAction(
       });
     }
 
+    if (buyerShare > 0 && dispute.escrow.fundingSource === "WALLET") {
+      await creditEscrowRefund({
+        userId: dispute.escrow.buyerId,
+        amount: buyerShare,
+        escrowId: dispute.escrowId,
+        description: `Dispute split (buyer share): ${dispute.escrow.project.title}`,
+        tx,
+      });
+    }
+
     await transitionEscrow(dispute.escrowId, EscrowStatus.RELEASED, {
       triggeredBy: "admin",
       userId: session.user.id,
@@ -379,11 +401,16 @@ export async function resolveDisputeSplitAction(
       metadata: { buyerShare, sellerShare },
     });
 
+    const buyerRefundNote =
+      dispute.escrow.fundingSource === "WALLET"
+        ? `buyer $${buyerShare.toFixed(2)} restored to wallet`
+        : `buyer $${buyerShare.toFixed(2)} (refund manually in Paynow)`;
+
     await tx.dispute.update({
       where: { id: dispute.id },
       data: {
         status: DisputeStatus.RESOLVED_SPLIT,
-        resolution: `${parsed.data.note}\n\nSplit: buyer $${buyerShare.toFixed(2)} (refund manually in Paynow), seller $${sellerShare.toFixed(2)} credited to wallet.`,
+        resolution: `${parsed.data.note}\n\nSplit: ${buyerRefundNote}, seller $${sellerShare.toFixed(2)} credited to wallet.`,
         buyerShareAmount: new Prisma.Decimal(buyerShare),
         sellerShareAmount: new Prisma.Decimal(sellerShare),
         resolvedAt: new Date(),

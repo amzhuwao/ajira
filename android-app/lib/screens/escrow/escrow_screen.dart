@@ -92,6 +92,25 @@ class _EscrowScreenState extends ConsumerState<EscrowScreen> {
     }
   }
 
+  Future<void> _fundFromWallet() async {
+    setState(() => _busy = true);
+    try {
+      await ref.read(apiClientProvider).post('/escrows/${widget.escrowId}/fund-wallet');
+      ref.invalidate(escrowProvider(widget.escrowId));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Escrow funded from wallet')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _approve() async {
     setState(() => _busy = true);
     try {
@@ -164,8 +183,13 @@ class _EscrowScreenState extends ConsumerState<EscrowScreen> {
                 const SizedBox(height: 24),
                 Text('Fund escrow', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 8),
+                FilledButton(
+                  onPressed: _busy ? null : _fundFromWallet,
+                  child: const Text('Fund from wallet'),
+                ),
+                const SizedBox(height: 16),
                 const Text(
-                  'Card / web checkout opens in a secure in-app browser. Ecocash and OneMoney stay on your phone.',
+                  'Or pay with Paynow. Web checkout opens in a secure in-app browser.',
                   style: TextStyle(color: AjiraColors.inkSoft),
                 ),
                 const SizedBox(height: 12),

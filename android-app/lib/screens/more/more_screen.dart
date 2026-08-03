@@ -42,6 +42,11 @@ class MoreScreen extends ConsumerWidget {
               title: const Text('Favorites'),
               onTap: () => context.push('/favorites'),
             ),
+            ListTile(
+              leading: const Icon(Icons.search),
+              title: const Text('Browse projects'),
+              onTap: () => context.push('/browse'),
+            ),
           ],
           if (user.isSeller)
             ListTile(
@@ -54,7 +59,7 @@ class MoreScreen extends ConsumerWidget {
             title: const Text('Disputes'),
             onTap: () => context.push('/disputes'),
           ),
-          if (user.isSeller)
+          if (user.isBuyer || user.isSeller)
             ListTile(
               leading: const Icon(Icons.account_balance_wallet_outlined),
               title: const Text('Wallet'),

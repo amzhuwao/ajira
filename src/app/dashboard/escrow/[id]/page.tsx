@@ -9,6 +9,7 @@ import {
 import { approveWorkAction } from "@/lib/actions/projects";
 import { prisma } from "@/lib/prisma";
 import { formatDate, formatMoney, requireSession } from "@/lib/utils";
+import { getOrCreateWallet } from "@/lib/wallet";
 
 export default async function EscrowPage({
   params,
@@ -41,6 +42,10 @@ export default async function EscrowPage({
 
   const isBuyer = escrow.buyerId === session.user.id;
   const isSeller = escrow.sellerId === session.user.id;
+  const wallet =
+    isBuyer && escrow.status === "PENDING"
+      ? await getOrCreateWallet(session.user.id)
+      : null;
   const canPlanMilestones =
     isBuyer &&
     (escrow.status === "PENDING" || escrow.status === "FUNDED") &&
@@ -92,13 +97,16 @@ export default async function EscrowPage({
 
       {escrow.status === "PENDING" && isBuyer ? (
         <section className="panel mt-8">
-          <h2 className="font-display text-2xl">Fund with Paynow</h2>
+          <h2 className="font-display text-2xl">Fund escrow</h2>
           <p className="mt-2 text-sm text-ink-soft">
-            Pay via web checkout or Ecocash / OneMoney. Escrow unlocks when Paynow
-            confirms payment.
+            Use prepaid wallet balance or pay directly with Paynow (web / Ecocash / OneMoney).
           </p>
           <div className="mt-4">
-            <FundEscrowForm escrowId={escrow.id} />
+            <FundEscrowForm
+              escrowId={escrow.id}
+              amount={Number(escrow.amount)}
+              walletBalance={Number(wallet?.balance ?? 0)}
+            />
           </div>
         </section>
       ) : null}

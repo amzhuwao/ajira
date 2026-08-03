@@ -1,6 +1,18 @@
 import { prisma } from "@/lib/prisma";
-import { withdrawalSchema } from "@/lib/validations";
-import { debitForWithdrawal, getOrCreateWallet } from "@/lib/wallet";
+import { walletTopUpSchema, withdrawalSchema } from "@/lib/validations";
+import {
+  creditTopUp,
+  debitForEscrow,
+  debitForWithdrawal,
+  getOrCreateWallet,
+} from "@/lib/wallet";
+import {
+  initiateMobilePayment,
+  initiateWebPayment,
+  isPaynowConfigured,
+  pollPayment,
+} from "@/lib/paynow";
+import { transitionEscrow } from "@/lib/escrow";
 import { MobileAuthError, requireMobileAuth } from "@/lib/mobile/auth";
 import {
   handleMobileError,
@@ -10,6 +22,13 @@ import {
   readJsonBody,
 } from "@/lib/mobile/http";
 
+function appBaseUrl() {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ??
+    process.env.NEXTAUTH_URL ??
+    "https://ajira.online"
+  );
+}
 export async function mobileListNotifications(request: Request) {
   try {
     const user = await requireMobileAuth(request);
@@ -58,24 +77,45 @@ export async function mobileMarkNotificationsRead(request: Request) {
 
 export async function mobileGetWallet(request: Request) {
   try {
-    const user = await requireMobileAuth(request, ["SELLER", "ADMIN"]);
+    const user = await requireMobileAuth(request, ["BUYER", "SELLER", "ADMIN"]);
     const wallet = await getOrCreateWallet(user.id);
     const txns = await prisma.walletTransaction.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
       take: 40,
+      include: {
+        escrow: { include: { project: { select: { id: true, title: true } } } },
+      },
     });
-    const withdrawals = await prisma.withdrawalRequest.findMany({
-      where: { userId: user.id },
-      orderBy: { createdAt: "desc" },
-      take: 20,
+    const withdrawals =
+      user.role === "SELLER" || user.role === "ADMIN"
+        ? await prisma.withdrawalRequest.findMany({
+            where: { userId: user.id },
+            orderBy: { createdAt: "desc" },
+            take: 20,
+          })
+        : [];
+    const topUps =
+      user.role === "BUYER" || user.role === "ADMIN"
+        ? await prisma.walletTopUp.findMany({
+            where: { userId: user.id },
+            orderBy: { createdAt: "desc" },
+            take: 15,
+          })
+        : [];
+    const spent = await prisma.walletTransaction.aggregate({
+      where: { userId: user.id, type: "DEBIT" },
+      _sum: { amount: true },
     });
+
     return jsonOk({
+      role: user.role,
       wallet: {
         balance: money(wallet.balance),
         pendingBalance: money(wallet.pendingBalance),
         currency: "USD",
       },
+      totalSpent: money(spent._sum.amount),
       transactions: txns.map((t) => ({
         id: t.id,
         type: t.type,
@@ -83,6 +123,8 @@ export async function mobileGetWallet(request: Request) {
         balanceAfter: money(t.balanceAfter),
         description: t.description,
         status: t.status,
+        escrowId: t.escrowId,
+        project: t.escrow?.project ?? null,
         createdAt: t.createdAt.toISOString(),
       })),
       withdrawals: withdrawals.map((w) => ({
@@ -93,7 +135,183 @@ export async function mobileGetWallet(request: Request) {
         status: w.status,
         createdAt: w.createdAt.toISOString(),
       })),
+      topUps: topUps.map((t) => ({
+        id: t.id,
+        amount: money(t.amount),
+        channel: t.channel,
+        status: t.status,
+        creditedAt: t.creditedAt?.toISOString() ?? null,
+        createdAt: t.createdAt.toISOString(),
+      })),
     });
+  } catch (err) {
+    return handleMobileError(err);
+  }
+}
+
+export async function mobileTopUpWallet(request: Request) {
+  try {
+    const user = await requireMobileAuth(request, ["BUYER", "ADMIN"]);
+    if (!isPaynowConfigured()) {
+      throw new MobileAuthError(400, "Paynow is not configured.");
+    }
+    const body = await readJsonBody<{
+      amount?: number;
+      channel?: string;
+      phone?: string;
+    }>(request);
+    const parsed = walletTopUpSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new MobileAuthError(
+        400,
+        parsed.error.issues[0]?.message ?? "Invalid top-up",
+      );
+    }
+
+    await getOrCreateWallet(user.id);
+    const dbUser = await prisma.user.findUnique({ where: { id: user.id } });
+    if (!dbUser) throw new MobileAuthError(404, "User not found");
+
+    const reference = `TOPUP-${user.id.slice(-6)}-${Date.now()}`;
+    const returnUrl = `${appBaseUrl()}/app/paynow-return?type=topup`;
+    const amount = parsed.data.amount;
+
+    if (parsed.data.channel === "WEB") {
+      const result = await initiateWebPayment({
+        reference,
+        email: dbUser.email,
+        description: "Ajira wallet top-up",
+        amount,
+        returnUrl,
+      });
+      if (!result.success || !result.redirectUrl) {
+        throw new MobileAuthError(400, result.error ?? "Failed to start payment");
+      }
+      const topUp = await prisma.walletTopUp.create({
+        data: {
+          userId: user.id,
+          merchantReference: reference,
+          pollUrl: result.pollUrl,
+          redirectUrl: result.redirectUrl,
+          channel: "WEB",
+          amount,
+          status: "SENT",
+        },
+      });
+      return jsonCreated({
+        topUpId: topUp.id,
+        redirectUrl: result.redirectUrl,
+        pollUrl: result.pollUrl,
+      });
+    }
+
+    const phone = parsed.data.phone!;
+    const method = parsed.data.channel === "ECOCASH" ? "ecocash" : "onemoney";
+    const result = await initiateMobilePayment({
+      reference,
+      email: dbUser.email,
+      description: "Ajira wallet top-up",
+      amount,
+      phone,
+      method,
+    });
+    if (!result.success) {
+      throw new MobileAuthError(400, result.error ?? "Failed to start payment");
+    }
+    const topUp = await prisma.walletTopUp.create({
+      data: {
+        userId: user.id,
+        merchantReference: reference,
+        pollUrl: result.pollUrl,
+        channel: parsed.data.channel === "ECOCASH" ? "ECOCASH" : "ONEMONEY",
+        phone,
+        amount,
+        status: "SENT",
+        instructions: result.instructions,
+      },
+    });
+    return jsonCreated({
+      topUpId: topUp.id,
+      instructions: result.instructions,
+      pollUrl: result.pollUrl,
+    });
+  } catch (err) {
+    return handleMobileError(err);
+  }
+}
+
+export async function mobilePollTopUp(request: Request, topUpId: string) {
+  try {
+    const user = await requireMobileAuth(request, ["BUYER", "ADMIN"]);
+    const topUp = await prisma.walletTopUp.findUnique({ where: { id: topUpId } });
+    if (!topUp || topUp.userId !== user.id) {
+      throw new MobileAuthError(404, "Top-up not found");
+    }
+    if (topUp.creditedAt) {
+      return jsonOk({ status: "credited", message: "Already credited" });
+    }
+    if (!topUp.pollUrl) throw new MobileAuthError(400, "No poll URL");
+
+    const status = await pollPayment(topUp.pollUrl);
+    await prisma.walletTopUp.update({
+      where: { id: topUp.id },
+      data: {
+        rawStatus: status.status,
+        paynowReference: status.paynowReference
+          ? String(status.paynowReference)
+          : topUp.paynowReference,
+        status: status.paid ? "PAID" : topUp.status,
+      },
+    });
+    if (status.paid) {
+      await creditTopUp({
+        userId: topUp.userId,
+        amount: topUp.amount,
+        topUpId: topUp.id,
+      });
+      return jsonOk({ status: "credited", message: "Top-up confirmed" });
+    }
+    return jsonOk({ status: status.status || "pending", message: "Payment pending" });
+  } catch (err) {
+    return handleMobileError(err);
+  }
+}
+
+export async function mobileFundEscrowFromWallet(request: Request, escrowId: string) {
+  try {
+    const user = await requireMobileAuth(request, ["BUYER", "ADMIN"]);
+    const escrow = await prisma.escrow.findUnique({
+      where: { id: escrowId },
+      include: { project: true },
+    });
+    if (!escrow || escrow.buyerId !== user.id) {
+      throw new MobileAuthError(404, "Escrow not found");
+    }
+    if (escrow.status !== "PENDING") {
+      throw new MobileAuthError(400, "Escrow is not awaiting payment");
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await debitForEscrow({
+        userId: user.id,
+        amount: escrow.amount,
+        escrowId: escrow.id,
+        description: `Funded escrow: ${escrow.project.title}`,
+        tx,
+      });
+      await tx.escrow.update({
+        where: { id: escrow.id },
+        data: { fundingSource: "WALLET" },
+      });
+      await transitionEscrow(escrow.id, "FUNDED", {
+        triggeredBy: "wallet",
+        userId: user.id,
+        reason: "Funded from prepaid wallet",
+        tx,
+      });
+    });
+
+    return jsonOk({ message: "Escrow funded from wallet" });
   } catch (err) {
     return handleMobileError(err);
   }

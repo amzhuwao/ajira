@@ -87,6 +87,140 @@ export async function creditEarnings(params: {
   return prisma.$transaction(async (client) => run(client));
 }
 
+/** Credit prepaid balance after a successful Paynow top-up (idempotent via creditedAt). */
+export async function creditTopUp(params: {
+  userId: string;
+  amount: Prisma.Decimal | number | string;
+  topUpId: string;
+  description?: string;
+  tx?: Prisma.TransactionClient;
+}) {
+  const amount = new Prisma.Decimal(params.amount);
+  if (amount.lte(0)) {
+    throw new Error("Amount must be positive");
+  }
+
+  const run = async (client: Prisma.TransactionClient) => {
+    const topUp = await client.walletTopUp.findUnique({ where: { id: params.topUpId } });
+    if (!topUp) throw new Error("Top-up not found");
+    if (topUp.creditedAt) {
+      return getOrCreateWallet(params.userId, client);
+    }
+
+    await getOrCreateWallet(params.userId, client);
+    const wallet = await client.sellerWallet.update({
+      where: { userId: params.userId },
+      data: { balance: { increment: amount } },
+    });
+
+    await client.walletTransaction.create({
+      data: {
+        userId: params.userId,
+        type: WalletTxnType.TOP_UP,
+        amount,
+        balanceAfter: wallet.balance,
+        description: params.description ?? "Wallet top-up",
+        status: "COMPLETED",
+      },
+    });
+
+    await client.walletTopUp.update({
+      where: { id: params.topUpId },
+      data: {
+        status: "PAID",
+        creditedAt: new Date(),
+      },
+    });
+
+    return wallet;
+  };
+
+  if (params.tx) return run(params.tx);
+  return prisma.$transaction(async (client) => run(client));
+}
+
+/** Debit buyer prepaid balance to fund an escrow. */
+export async function debitForEscrow(params: {
+  userId: string;
+  amount: Prisma.Decimal | number | string;
+  escrowId: string;
+  description?: string;
+  tx?: Prisma.TransactionClient;
+}) {
+  const amount = new Prisma.Decimal(params.amount);
+  if (amount.lte(0)) {
+    throw new Error("Amount must be positive");
+  }
+
+  const run = async (client: Prisma.TransactionClient) => {
+    const wallet = await getOrCreateWallet(params.userId, client);
+    if (new Prisma.Decimal(wallet.balance).lt(amount)) {
+      throw new Error("Insufficient wallet balance");
+    }
+
+    const updated = await client.sellerWallet.update({
+      where: { userId: params.userId },
+      data: { balance: { decrement: amount } },
+    });
+
+    await client.walletTransaction.create({
+      data: {
+        userId: params.userId,
+        escrowId: params.escrowId,
+        type: WalletTxnType.DEBIT,
+        amount,
+        balanceAfter: updated.balance,
+        description: params.description ?? "Escrow funding",
+        status: "COMPLETED",
+      },
+    });
+
+    return updated;
+  };
+
+  if (params.tx) return run(params.tx);
+  return prisma.$transaction(async (client) => run(client));
+}
+
+/** Restore buyer balance when a wallet-funded escrow is refunded. */
+export async function creditEscrowRefund(params: {
+  userId: string;
+  amount: Prisma.Decimal | number | string;
+  escrowId: string;
+  description?: string;
+  tx?: Prisma.TransactionClient;
+}) {
+  const amount = new Prisma.Decimal(params.amount);
+  if (amount.lte(0)) {
+    throw new Error("Amount must be positive");
+  }
+
+  const run = async (client: Prisma.TransactionClient) => {
+    await getOrCreateWallet(params.userId, client);
+    const wallet = await client.sellerWallet.update({
+      where: { userId: params.userId },
+      data: { balance: { increment: amount } },
+    });
+
+    await client.walletTransaction.create({
+      data: {
+        userId: params.userId,
+        escrowId: params.escrowId,
+        type: WalletTxnType.CREDIT,
+        amount,
+        balanceAfter: wallet.balance,
+        description: params.description ?? "Escrow refund to wallet",
+        status: "COMPLETED",
+      },
+    });
+
+    return wallet;
+  };
+
+  if (params.tx) return run(params.tx);
+  return prisma.$transaction(async (client) => run(client));
+}
+
 export async function debitForWithdrawal(params: {
   userId: string;
   amount: Prisma.Decimal | number | string;

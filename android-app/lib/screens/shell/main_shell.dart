@@ -32,7 +32,7 @@ class MainShell extends ConsumerWidget {
           _TabSpec('/home', 'Home', Icons.home_outlined, Icons.home),
           _TabSpec('/projects', 'Projects', Icons.folder_outlined, Icons.folder),
           _TabSpec('/messages', 'Chats', Icons.chat_bubble_outline, Icons.chat_bubble),
-          _TabSpec('/browse', 'Hire', Icons.people_outline, Icons.people),
+          _TabSpec('/wallet', 'Wallet', Icons.account_balance_wallet_outlined, Icons.account_balance_wallet),
           _TabSpec('/more', 'More', Icons.menu, Icons.menu),
         ];
     }

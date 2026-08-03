@@ -73,9 +73,14 @@ export default async function BuyerDashboardPage() {
             Track work on the board, fund escrow, and revisit trusted freelancers.
           </p>
         </div>
-        <Link href="/dashboard/projects/new" className="btn btn-primary">
-          Post a project
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/dashboard/wallet" className="btn btn-secondary">
+            Wallet
+          </Link>
+          <Link href="/dashboard/projects/new" className="btn btn-primary">
+            Post a project
+          </Link>
+        </div>
       </div>
 
       <section className="mt-10">

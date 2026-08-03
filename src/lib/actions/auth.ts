@@ -63,9 +63,7 @@ export async function registerAction(
       passwordHash,
       role: parsed.data.role,
       phone: parsed.data.phone || null,
-      ...(parsed.data.role === "SELLER"
-        ? { wallet: { create: {} } }
-        : {}),
+      wallet: { create: {} },
     },
   });
 

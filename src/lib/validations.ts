@@ -95,6 +95,20 @@ export const fundEscrowSchema = z.object({
   }
 });
 
+export const walletTopUpSchema = z.object({
+  amount: z.coerce.number().positive().min(1).max(50000),
+  channel: z.enum(["WEB", "ECOCASH", "ONEMONEY"]),
+  phone: z.string().min(7).max(20).optional().or(z.literal("")),
+}).superRefine((data, ctx) => {
+  if (data.channel !== "WEB" && !data.phone) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Phone number is required for mobile money",
+      path: ["phone"],
+    });
+  }
+});
+
 export const withdrawalSchema = z.object({
   amount: z.coerce.number().positive(),
   method: z.enum(["ECOCASH", "ONEMONEY", "BANK"]),

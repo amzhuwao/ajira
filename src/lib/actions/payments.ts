@@ -11,14 +11,23 @@ import {
   isPaynowConfigured,
   pollPayment,
 } from "@/lib/paynow";
-import { fundEscrowSchema, withdrawalSchema } from "@/lib/validations";
-import { debitForWithdrawal, getOrCreateWallet } from "@/lib/wallet";
+import { fundEscrowSchema, walletTopUpSchema, withdrawalSchema } from "@/lib/validations";
+import {
+  creditTopUp,
+  debitForEscrow,
+  debitForWithdrawal,
+  getOrCreateWallet,
+} from "@/lib/wallet";
 import { transitionEscrow } from "@/lib/escrow";
 import { logAdminAction } from "@/lib/audit";
 import type { ActionState } from "./auth";
 
 function moneyNumber(value: { toString(): string } | number): number {
   return typeof value === "number" ? value : Number(value.toString());
+}
+
+function appBaseUrl() {
+  return process.env.NEXTAUTH_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 }
 
 export async function fundEscrowAction(
@@ -60,7 +69,7 @@ export async function fundEscrowAction(
   const reference = `AJIRA-${escrow.id.slice(-8)}-${Date.now()}`;
   const amount = moneyNumber(escrow.amount);
   const description = `Escrow: ${escrow.project.title}`;
-  const returnUrl = `${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}/dashboard/escrow/return?escrowId=${escrow.id}`;
+  const returnUrl = `${appBaseUrl()}/dashboard/escrow/return?escrowId=${escrow.id}`;
 
   if (parsed.data.channel === "WEB") {
     const result = await initiateWebPayment({
@@ -159,6 +168,10 @@ export async function pollEscrowPaymentAction(paymentId: string): Promise<Action
   });
 
   if (status.paid && payment.escrow.status === EscrowStatus.PENDING) {
+    await prisma.escrow.update({
+      where: { id: payment.escrowId },
+      data: { fundingSource: "PAYNOW" },
+    });
     await transitionEscrow(payment.escrowId, EscrowStatus.FUNDED, {
       triggeredBy: "paynow_poll",
       reason: "Payment confirmed via poll",
@@ -184,6 +197,199 @@ export async function pollEscrowPaymentAction(paymentId: string): Promise<Action
     }
     revalidatePath(`/dashboard/escrow/${payment.escrowId}`);
     return { success: "Payment confirmed. Escrow funded." };
+  }
+
+  return { error: `Payment status: ${status.status || "pending"}` };
+}
+
+export async function fundEscrowFromWalletAction(escrowId: string): Promise<ActionState> {
+  const session = await requireRole("BUYER", "ADMIN");
+
+  const escrow = await prisma.escrow.findUnique({
+    where: { id: escrowId },
+    include: { project: true },
+  });
+  if (!escrow || escrow.buyerId !== session.user.id) {
+    return { error: "Escrow not found." };
+  }
+  if (escrow.status !== EscrowStatus.PENDING) {
+    return { error: "Escrow is not awaiting payment." };
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await debitForEscrow({
+        userId: session.user.id,
+        amount: escrow.amount,
+        escrowId: escrow.id,
+        description: `Funded escrow: ${escrow.project.title}`,
+        tx,
+      });
+      await tx.escrow.update({
+        where: { id: escrow.id },
+        data: { fundingSource: "WALLET" },
+      });
+      await transitionEscrow(escrow.id, EscrowStatus.FUNDED, {
+        triggeredBy: "wallet",
+        userId: session.user.id,
+        reason: "Funded from prepaid wallet",
+        tx,
+      });
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not fund from wallet." };
+  }
+
+  try {
+    const { createNotification } = await import("@/lib/notifications");
+    await createNotification({
+      userId: escrow.sellerId,
+      type: "ESCROW_FUNDED",
+      title: `Escrow funded: ${escrow.project.title}`,
+      body: "You can start work. Mark delivery when ready.",
+      href: `/dashboard/escrow/${escrow.id}`,
+    });
+  } catch (err) {
+    console.error("Funded notification failed", err);
+  }
+
+  revalidatePath(`/dashboard/escrow/${escrow.id}`);
+  revalidatePath("/dashboard/wallet");
+  return { success: "Escrow funded from your wallet." };
+}
+
+export async function topUpWalletAction(
+  _prev: ActionState & { instructions?: string; topUpId?: string },
+  formData: FormData,
+): Promise<ActionState & { instructions?: string; topUpId?: string }> {
+  const session = await requireRole("BUYER", "ADMIN");
+
+  if (!isPaynowConfigured()) {
+    return {
+      error:
+        "Paynow is not configured. Set PAYNOW_INTEGRATION_ID and PAYNOW_INTEGRATION_KEY.",
+    };
+  }
+
+  const parsed = walletTopUpSchema.safeParse({
+    amount: formData.get("amount"),
+    channel: formData.get("channel"),
+    phone: formData.get("phone"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid top-up" };
+  }
+
+  await getOrCreateWallet(session.user.id);
+
+  const reference = `TOPUP-${session.user.id.slice(-6)}-${Date.now()}`;
+  const amount = parsed.data.amount;
+  const description = "Ajira wallet top-up";
+  const returnUrl = `${appBaseUrl()}/dashboard/wallet/return`;
+
+  const user = await prisma.user.findUnique({ where: { id: session.user.id } });
+  if (!user) return { error: "User not found." };
+
+  if (parsed.data.channel === "WEB") {
+    const result = await initiateWebPayment({
+      reference,
+      email: user.email,
+      description,
+      amount,
+      returnUrl,
+    });
+    if (!result.success || !result.redirectUrl) {
+      return { error: result.error ?? "Failed to initiate Paynow payment." };
+    }
+
+    await prisma.walletTopUp.create({
+      data: {
+        userId: session.user.id,
+        merchantReference: reference,
+        pollUrl: result.pollUrl,
+        redirectUrl: result.redirectUrl,
+        channel: PaymentChannel.WEB,
+        amount,
+        status: PaymentStatus.SENT,
+      },
+    });
+
+    redirect(result.redirectUrl);
+  }
+
+  const phone = parsed.data.phone!;
+  const method = parsed.data.channel === "ECOCASH" ? "ecocash" : "onemoney";
+  const result = await initiateMobilePayment({
+    reference,
+    email: user.email,
+    description,
+    amount,
+    phone,
+    method,
+  });
+  if (!result.success) {
+    return { error: result.error ?? "Failed to initiate mobile payment." };
+  }
+
+  const topUp = await prisma.walletTopUp.create({
+    data: {
+      userId: session.user.id,
+      merchantReference: reference,
+      pollUrl: result.pollUrl,
+      channel:
+        parsed.data.channel === "ECOCASH"
+          ? PaymentChannel.ECOCASH
+          : PaymentChannel.ONEMONEY,
+      phone,
+      amount,
+      status: PaymentStatus.SENT,
+      instructions: result.instructions,
+    },
+  });
+
+  revalidatePath("/dashboard/wallet");
+  return {
+    success: "Mobile payment initiated. Complete the prompt on your phone.",
+    instructions: result.instructions,
+    topUpId: topUp.id,
+  };
+}
+
+export async function pollWalletTopUpAction(topUpId: string): Promise<ActionState> {
+  const session = await requireSession();
+
+  const topUp = await prisma.walletTopUp.findUnique({ where: { id: topUpId } });
+  if (!topUp || topUp.userId !== session.user.id) {
+    return { error: "Top-up not found." };
+  }
+  if (topUp.creditedAt) {
+    return { success: "Already credited." };
+  }
+  if (!topUp.pollUrl) {
+    return { error: "No poll URL for this payment." };
+  }
+
+  const status = await pollPayment(topUp.pollUrl);
+  await prisma.walletTopUp.update({
+    where: { id: topUp.id },
+    data: {
+      rawStatus: status.status,
+      paynowReference: status.paynowReference
+        ? String(status.paynowReference)
+        : topUp.paynowReference,
+      status: status.paid ? PaymentStatus.PAID : topUp.status,
+    },
+  });
+
+  if (status.paid) {
+    await creditTopUp({
+      userId: topUp.userId,
+      amount: topUp.amount,
+      topUpId: topUp.id,
+      description: "Wallet top-up via Paynow",
+    });
+    revalidatePath("/dashboard/wallet");
+    return { success: "Top-up confirmed. Balance updated." };
   }
 
   return { error: `Payment status: ${status.status || "pending"}` };

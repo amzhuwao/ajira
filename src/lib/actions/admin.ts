@@ -8,7 +8,7 @@ import { platformSettingsSchema } from "@/lib/validations";
 import { ensureDefaultSettings, setSetting } from "@/lib/settings";
 import { logAdminAction } from "@/lib/audit";
 import { refreshSellerStatistics } from "@/lib/stats";
-import { creditEarnings, getOrCreateWallet } from "@/lib/wallet";
+import { creditEarnings, creditEscrowRefund, getOrCreateWallet } from "@/lib/wallet";
 import { transitionEscrow } from "@/lib/escrow";
 import type { ActionState } from "./auth";
 
@@ -294,10 +294,22 @@ export async function adminRefundEscrowAction(
   }
 
   try {
-    await transitionEscrow(escrowId, EscrowStatus.REFUNDED, {
-      triggeredBy: "admin",
-      userId: session.user.id,
-      reason,
+    await prisma.$transaction(async (tx) => {
+      await transitionEscrow(escrowId, EscrowStatus.REFUNDED, {
+        triggeredBy: "admin",
+        userId: session.user.id,
+        reason,
+        tx,
+      });
+      if (escrow.fundingSource === "WALLET") {
+        await creditEscrowRefund({
+          userId: escrow.buyerId,
+          amount: escrow.amount,
+          escrowId,
+          description: `Admin refund to wallet: ${escrow.project.title}`,
+          tx,
+        });
+      }
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Refund failed." };
@@ -316,8 +328,11 @@ export async function adminRefundEscrowAction(
   revalidatePath("/dashboard/admin/escrows");
   revalidatePath("/dashboard/admin");
   revalidatePath(`/dashboard/escrow/${escrowId}`);
+  revalidatePath("/dashboard/wallet");
   return {
     success:
-      "Escrow marked refunded. Process the Paynow refund in the merchant dashboard.",
+      escrow.fundingSource === "WALLET"
+        ? "Escrow refunded to buyer wallet."
+        : "Escrow marked refunded. Process the Paynow refund in the merchant dashboard.",
   };
 }
